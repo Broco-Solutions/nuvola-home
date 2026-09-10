@@ -8,13 +8,13 @@ export function ProductCard({ product, priority = false }: { product: CatalogPro
 
   return (
     <article className="product-card" data-reveal>
-      <Link className="product-image" href={`/products/${product.slug}`} aria-label={`View ${product.name}`}>
+      <Link className="product-image" href={`/products/${product.slug}`} prefetch={false} aria-label={`View ${product.name}`}>
         <Image
           className="product-image-primary"
           src={product.images[0]}
           alt={product.name}
           fill
-          priority={priority}
+          preload={priority}
           sizes="(max-width: 680px) 100vw, (max-width: 1100px) 50vw, 33vw"
         />
         {product.images[1] && (
@@ -32,7 +32,7 @@ export function ProductCard({ product, priority = false }: { product: CatalogPro
       <div className="product-meta">
         <div>
           <p>{product.subcategory}</p>
-          <h3><Link href={`/products/${product.slug}`}>{product.name}</Link></h3>
+          <h3><Link href={`/products/${product.slug}`} prefetch={false}>{product.name}</Link></h3>
         </div>
         <div className="price">
           <span>{formatPrice(product.price, product.currency)}</span>

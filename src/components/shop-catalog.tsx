@@ -119,7 +119,7 @@ export function ShopCatalog({
           )}
         </div>
         {visible.length ? (
-          <div className="product-grid">{visible.map((item, index) => <ProductCard product={item} priority={index < 3} key={item.id} />)}</div>
+          <div className="product-grid">{visible.map((item, index) => <ProductCard product={item} priority={!initialCategory && index < 2} key={item.id} />)}</div>
         ) : (
           <div className="empty-state">
             <p className="eyebrow">NO MATCHES</p>

@@ -1,14 +1,28 @@
 import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Manrope } from "next/font/google";
 import { Footer } from "@/components/footer";
+import type { SearchProduct } from "@/components/global-search";
 import { Header } from "@/components/header";
 import { PersistentVisit } from "@/components/persistent-visit";
 import { ScrollMotion } from "@/components/scroll-motion";
 import { siteConfig } from "@/config/site";
+import { products } from "@/data/products";
 import "./globals.css";
 
 const sans = Manrope({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 const display = Cormorant_Garamond({ subsets: ["latin"], variable: "--font-display", weight: ["400", "500"], display: "swap" });
+
+const searchProducts: SearchProduct[] = products.map((product) => ({
+  id: product.id,
+  slug: product.slug,
+  name: product.name,
+  category: product.category,
+  subcategory: product.subcategory,
+  price: product.price,
+  currency: product.currency,
+  images: [product.images[0]],
+  featured: product.featured,
+}));
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteConfig.url),
@@ -61,7 +75,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className={`${sans.variable} ${display.variable}`} data-scroll-behavior="smooth">
       <body>
         <a className="skip-link" href="#main-content">Skip to content</a>
-        <Header />
+        <Header searchProducts={searchProducts} />
         <main id="main-content">{children}</main>
         <PersistentVisit />
         <Footer />

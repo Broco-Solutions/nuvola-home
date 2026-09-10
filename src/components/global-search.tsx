@@ -4,7 +4,18 @@ import Image from "next/image";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatPrice, type CatalogProduct } from "@/data/products";
+import type { CatalogProduct } from "@/data/products";
+
+export type SearchProduct = Pick<
+  CatalogProduct,
+  "id" | "slug" | "name" | "category" | "subcategory" | "price" | "currency" | "images" | "featured"
+>;
+
+const priceFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
 
 export function GlobalSearch({
   open,
@@ -13,7 +24,7 @@ export function GlobalSearch({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  products: CatalogProduct[];
+  products: SearchProduct[];
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -93,7 +104,7 @@ export function GlobalSearch({
                   <small>{item.category} / {item.subcategory}</small>
                   <strong>{item.name}</strong>
                 </span>
-                <span>{formatPrice(item.price, item.currency)}</span>
+                <span>{priceFormatter.format(item.price)}</span>
               </Link>
             ))}
           </div>

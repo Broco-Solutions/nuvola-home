@@ -50,7 +50,7 @@ export default function Home() {
         </div>
         <div className="room-panels">
           {categories.map((category, index) => (
-            <Link className={`room-panel room-panel-${index + 1}`} href={`/collections/${category.toLowerCase()}`} key={category}>
+            <Link className={`room-panel room-panel-${index + 1}`} href={`/collections/${category.toLowerCase()}`} prefetch={false} key={category}>
               <Image src={categoryMedia[category]} alt={`${category} furniture collection`} fill sizes="(max-width: 760px) 100vw, 50vw" />
               <span className="room-panel-shade" />
               <span className="room-panel-content">
@@ -67,7 +67,7 @@ export default function Home() {
         <div className="shell">
           <SectionHeading eyebrow="THE CURRENT EDIT" title="Pieces with presence." link="/shop" linkLabel="View all 24 pieces" />
           <div className="product-grid home-product-grid">
-            {featuredProducts.slice(0, 6).map((item, index) => <ProductCard product={item} priority={index < 3} key={item.id} />)}
+            {featuredProducts.slice(0, 6).map((item) => <ProductCard product={item} key={item.id} />)}
           </div>
         </div>
       </section>

@@ -5,8 +5,7 @@ import { Menu, Search, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { BrandWordmark } from "@/components/brand";
-import { GlobalSearch } from "@/components/global-search";
-import { products, toCatalogProduct } from "@/data/products";
+import { GlobalSearch, type SearchProduct } from "@/components/global-search";
 
 const navigation = [
   { label: "Shop", href: "/shop" },
@@ -17,9 +16,7 @@ const navigation = [
   { label: "Showroom", href: "/showroom" },
 ];
 
-const searchProducts = products.map(toCatalogProduct);
-
-export function Header() {
+export function Header({ searchProducts }: { searchProducts: SearchProduct[] }) {
   const pathname = usePathname();
   const menuRef = useRef<HTMLDialogElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -27,10 +24,27 @@ export function Header() {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
+    let frame = 0;
+    let previous = false;
+
+    const update = () => {
+      frame = 0;
+      const next = window.scrollY > 20;
+      if (next !== previous) {
+        previous = next;
+        setScrolled(next);
+      }
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, []);
 
   useEffect(() => {
