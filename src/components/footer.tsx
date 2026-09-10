@@ -43,27 +43,25 @@ export function Footer() {
         </div>
       </div>
       <div className="footer-bottom shell">
-        <div className="footer-bottom-legal">
-          <span>© {new Date().getFullYear()} {siteConfig.legalName}</span>
-          <a
-            className="broco-credit"
-            href="https://www.brocosolutions.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Powered by Broco Solutions"
-          >
-            <span>Powered by</span>
-            <Image
-              src="/brand/Logo BS - Gradiente.svg"
-              alt=""
-              width={82}
-              height={32}
-              loading="eager"
-              unoptimized
-            />
-          </a>
-        </div>
-        <span>Contemporary furniture in Miami</span>
+        <span>© {new Date().getFullYear()} {siteConfig.legalName}</span>
+        <a
+          className="broco-credit"
+          href="https://www.brocosolutions.com/"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Powered by Broco Solutions"
+        >
+          <span>Powered by</span>
+          <Image
+            src="/brand/Logo BS - Gradiente.svg"
+            alt=""
+            width={82}
+            height={32}
+            loading="eager"
+            unoptimized
+          />
+        </a>
+        <span className="footer-bottom-location">Contemporary furniture in Miami</span>
       </div>
     </footer>
   );

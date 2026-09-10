@@ -336,8 +336,8 @@ dialog::backdrop { background: rgba(20,20,17,.45); backdrop-filter: blur(3px); }
 .footer-wordmark { margin: 12px 0 17px !important; color: white !important; }
 .footer-wordmark .brand-wordmark { width: 174px; }
 .footer-brand p { max-width: 250px; }
-.footer-bottom { display: flex; justify-content: space-between; padding-block: 22px; border-top: 1px solid rgba(255,255,255,.15); color: rgba(255,255,255,.48); font-size: 8px; font-weight: 700; text-transform: uppercase; }
-.footer-bottom-legal { display: flex; align-items: center; gap: 18px; }
+.footer-bottom { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; padding-block: 22px; border-top: 1px solid rgba(255,255,255,.15); color: rgba(255,255,255,.48); font-size: 8px; font-weight: 700; text-transform: uppercase; }
+.footer-bottom-location { justify-self: end; text-align: right; }
 .broco-credit { display: inline-flex; align-items: center; gap: 7px; color: rgba(255,255,255,.48); line-height: 1; transition: opacity .2s ease; }
 .broco-credit:hover { color: rgba(255,255,255,.48); opacity: .78; }
 .broco-credit:focus-visible { outline-color: white; outline-offset: 5px; }
@@ -544,8 +544,8 @@ dialog::backdrop { background: rgba(20,20,17,.45); backdrop-filter: blur(3px); }
   .footer-grid { grid-template-columns: 1fr 1fr; gap: 45px 30px; padding-block: 55px; }
   .footer-brand { grid-column: span 2; }
   .footer-visit { grid-column: span 2; }
-  .footer-bottom { align-items: flex-start; flex-direction: column; gap: 8px; }
-  .footer-bottom-legal { flex-wrap: wrap; gap: 8px 15px; }
+  .footer-bottom { grid-template-columns: 1fr; justify-items: start; gap: 10px; }
+  .footer-bottom-location { justify-self: start; text-align: left; }
   .search-result { grid-template-columns: 68px 1fr auto; min-height: 90px; gap: 12px; }
   .search-result-image { width: 68px; height: 68px; }
   .search-result-copy strong { max-width: 47vw; }
