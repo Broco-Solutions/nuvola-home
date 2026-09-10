@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-labelledby="title">
+  <title id="title">Nuvola Home monogram</title>
+  <g fill="none" stroke="#1b1b18" stroke-linecap="square">
+    <path d="M8 40V8L36 40V8" stroke-width="3"/>
+    <path d="M8 44H40" stroke-width="1"/>
+  </g>
+</svg>

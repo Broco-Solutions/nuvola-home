@@ -1,0 +1,15 @@
+node_modules
+.next
+out
+.DS_Store
+*.log
+*.tsbuildinfo
+.env*
+!.env.example
+.vercel
+.codex-night
+.agent-browser
+browser-*.png
+*.har
+playwright-report
+test-results
