@@ -53,7 +53,7 @@ export function Footer() {
         >
           <span>Powered by</span>
           <Image
-            src="/brand/Logo BS - Gradiente.svg"
+            src="/brand/Logo BS - Negativo.svg"
             alt=""
             width={82}
             height={32}
