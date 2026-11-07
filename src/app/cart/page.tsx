@@ -3,7 +3,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,6 +18,7 @@ import styles from "./cart.module.css";
 
 type CheckoutResponse = {
   url?: string;
+  sessionId?: string;
   error?: string;
 };
 
@@ -29,6 +30,7 @@ export default function CartPage() {
     removeItem,
     updateQuantity,
     clearCart,
+    rememberCheckout,
   } = useCart();
 
   const [processing, setProcessing] = useState(false);
@@ -37,25 +39,39 @@ export default function CartPage() {
   );
 
   const isEmpty = items.length === 0;
+  const checkoutRequest = useRef<{ cart: string; id: string } | null>(null);
+  const checkoutInFlight = useRef(false);
+
+  useEffect(() => {
+    function resumeCart(event: PageTransitionEvent) {
+      if (!event.persisted) return;
+      checkoutInFlight.current = false;
+      setProcessing(false);
+    }
+    window.addEventListener("pageshow", resumeCart);
+    return () => window.removeEventListener("pageshow", resumeCart);
+  }, []);
 
   async function handleCheckout() {
-    if (processing || isEmpty) return;
+    if (checkoutInFlight.current || isEmpty) return;
 
+    checkoutInFlight.current = true;
     setProcessing(true);
     setCheckoutError(null);
 
     try {
+      const purchased = items.map(({ slug, quantity }) => ({ slug, quantity }));
+      const body = JSON.stringify({ items: purchased });
+      if (checkoutRequest.current?.cart !== body) {
+        checkoutRequest.current = { cart: body, id: crypto.randomUUID() };
+      }
       const response = await fetch("/api/checkout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Idempotency-Key": checkoutRequest.current.id,
         },
-        body: JSON.stringify({
-          items: items.map((item) => ({
-            slug: item.slug,
-            quantity: item.quantity,
-          })),
-        }),
+        body,
       });
 
       const data: CheckoutResponse = await response
@@ -70,7 +86,8 @@ export default function CartPage() {
         );
       }
 
-      if (typeof data.url !== "string") {
+      if (typeof data.url !== "string" || typeof data.sessionId !== "string" ||
+        !/^cs_(?:test|live)_[A-Za-z0-9]+$/.test(data.sessionId)) {
         throw new Error("Invalid checkout response.");
       }
 
@@ -78,11 +95,13 @@ export default function CartPage() {
 
       if (
         checkoutUrl.protocol !== "https:" ||
-        checkoutUrl.hostname !== "checkout.stripe.com"
+        checkoutUrl.hostname !== "checkout.stripe.com" ||
+        checkoutUrl.username || checkoutUrl.password || checkoutUrl.port
       ) {
         throw new Error("Invalid checkout destination.");
       }
 
+      rememberCheckout(data.sessionId, purchased);
       window.location.assign(checkoutUrl.href);
     } catch (error) {
       setCheckoutError(
@@ -91,6 +110,7 @@ export default function CartPage() {
           : "Something went wrong. Please try again.",
       );
       setProcessing(false);
+      checkoutInFlight.current = false;
     }
   }
 
@@ -281,11 +301,6 @@ export default function CartPage() {
                 <strong>{formatPrice(subtotal)}</strong>
               </div>
 
-              <div className={styles.summaryRow}>
-                <span>Delivery or pickup</span>
-                <span>Confirmed at checkout</span>
-              </div>
-
               <div className={styles.summaryDivider} />
 
               <div className={styles.summaryTotal}>
@@ -294,8 +309,7 @@ export default function CartPage() {
               </div>
 
               <p className={styles.summaryNote}>
-                Taxes and any applicable delivery charges
-                are calculated during secure checkout.
+                Taxes are calculated during secure checkout.
                 Final amounts will be shown before payment.
               </p>
 

@@ -9,15 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import type { CatalogProduct } from "@/data/products";
-
-export type CartItem = {
-  slug: string;
-  name: string;
-  price: number;
-  currency: "USD";
-  image: string;
-  quantity: number;
-};
+import { normalizeCart, subtractPurchasedItems, toCartItem, MAX_CART_ITEMS, MAX_CART_QUANTITY, type CartItem, type PurchasedItem } from "@/lib/cart";
+export type { CartItem } from "@/lib/cart";
 
 type CartContextValue = {
   items: CartItem[];
@@ -27,11 +20,15 @@ type CartContextValue = {
   removeItem: (slug: string) => void;
   updateQuantity: (slug: string, quantity: number) => void;
   clearCart: () => void;
+  rememberCheckout: (sessionId: string, purchased: PurchasedItem[]) => void;
+  completeCheckout: (sessionId: string) => void;
 };
 
 const STORAGE_KEY = "nuvola-cart-v1";
-const MAX_QUANTITY = 99;
-const MAX_ITEMS = 50;
+const CHECKOUT_STORAGE_KEY = "nuvola-checkout-";
+const MAX_QUANTITY = MAX_CART_QUANTITY;
+const MAX_ITEMS = MAX_CART_ITEMS;
+const pendingCheckouts = new Map<string, PurchasedItem[]>();
 
 const EMPTY_CART: CartItem[] = [];
 
@@ -49,49 +46,7 @@ function readStoredCart(): CartItem[] {
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (!saved) return EMPTY_CART;
 
-    const parsed: unknown = JSON.parse(saved);
-    if (!Array.isArray(parsed)) return EMPTY_CART;
-
-    const validItems: CartItem[] = [];
-    const seenSlugs = new Set<string>();
-
-    for (const entry of parsed.slice(0, MAX_ITEMS)) {
-      if (typeof entry !== "object" || entry === null) continue;
-
-      const item = entry as Record<string, unknown>;
-
-      if (
-        typeof item.slug !== "string" ||
-        !item.slug ||
-        typeof item.name !== "string" ||
-        typeof item.price !== "number" ||
-        !Number.isFinite(item.price) ||
-        item.price < 0 ||
-        item.currency !== "USD" ||
-        typeof item.image !== "string" ||
-        typeof item.quantity !== "number" ||
-        !Number.isInteger(item.quantity) ||
-        seenSlugs.has(item.slug)
-      ) {
-        continue;
-      }
-
-      seenSlugs.add(item.slug);
-
-      validItems.push({
-        slug: item.slug,
-        name: item.name,
-        price: item.price,
-        currency: "USD",
-        image: item.image,
-        quantity: Math.max(
-          1,
-          Math.min(item.quantity, MAX_QUANTITY),
-        ),
-      });
-    }
-
-    return validItems;
+    return normalizeCart(JSON.parse(saved));
   } catch {
     return EMPTY_CART;
   }
@@ -217,14 +172,7 @@ export function CartProvider({
 
         saveCart([
           ...current,
-          {
-            slug: product.slug,
-            name: product.name,
-            price: product.price,
-            currency: product.currency,
-            image: product.images[0] ?? "",
-            quantity: 1,
-          },
+          toCartItem(product, 1),
         ]);
       },
 
@@ -267,6 +215,31 @@ export function CartProvider({
 
       clearCart() {
         saveCart([]);
+      },
+
+      rememberCheckout(sessionId, purchased) {
+        pendingCheckouts.set(sessionId, purchased);
+        try {
+          // Per-tab storage survives the Stripe redirect without mixing up
+          // different checkouts in other tabs. No customer/payment data.
+          window.sessionStorage.setItem(CHECKOUT_STORAGE_KEY + sessionId, JSON.stringify(purchased));
+        } catch {
+          // Payment can proceed even if browser storage is unavailable.
+        }
+      },
+
+      completeCheckout(sessionId) {
+        let purchased = pendingCheckouts.get(sessionId);
+        try {
+          const stored = window.sessionStorage.getItem(CHECKOUT_STORAGE_KEY + sessionId);
+          if (stored) purchased = normalizeCart(JSON.parse(stored));
+          // Consume once: reloading an old success page must preserve new items.
+          window.sessionStorage.removeItem(CHECKOUT_STORAGE_KEY + sessionId);
+        } catch {
+          // Without a matching checkout snapshot, preserve the cart.
+        }
+        pendingCheckouts.delete(sessionId);
+        if (purchased) saveCart(subtractPurchasedItems(getSnapshot(), purchased));
       },
     };
   }, [items]);

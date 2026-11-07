@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test:commerce": "node --import ./scripts/register-commerce-tests.mjs --test scripts/commerce.test.mjs",
     "audit:images": "node scripts/audit-product-images.mjs",
     "sources:generate": "node scripts/generate-content-sources.mjs"
   },

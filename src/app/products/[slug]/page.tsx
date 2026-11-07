@@ -12,6 +12,7 @@ import { AddToCartButton } from "@/components/add-to-cart-button";
 import { ProductCard } from "@/components/product-card";
 import { ProductGallery } from "@/components/product-gallery";
 import { siteConfig } from "@/config/site";
+import { getCheckoutConfiguration, isProductApproved } from "@/lib/commerce-config";
 import {
   formatPrice,
   getProductBySlug,
@@ -63,17 +64,8 @@ export default async function ProductPage({
 
   if (!product) notFound();
 
-  const approvedSlugs = new Set(
-    (process.env.NUVOLA_APPROVED_PRODUCT_SLUGS ?? "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
-  );
-
   const canBuyOnline =
-    process.env.STRIPE_LIVE_CHECKOUT_ENABLED === "true" &&
-    approvedSlugs.has(product.slug) &&
-    product.subcategory !== "Beds";
+    getCheckoutConfiguration() !== null && isProductApproved(product);
 
   const related = getProductsByCategory(product.category)
     .filter((item) => item.id !== product.id)

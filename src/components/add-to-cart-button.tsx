@@ -6,6 +6,7 @@ import { ArrowRight, Check, ShoppingBag } from "lucide-react";
 import { useState } from "react";
 import { useCart } from "@/components/cart-provider";
 import type { CatalogProduct } from "@/data/products";
+import { MAX_CART_ITEMS, MAX_CART_QUANTITY } from "@/lib/cart";
 
 type AddToCartButtonProps = {
   product: CatalogProduct;
@@ -22,10 +23,11 @@ export function AddToCartButton({
   );
 
   const quantity = cartItem?.quantity ?? 0;
-  const atLimit = quantity >= 99;
+  const atLimit = quantity >= MAX_CART_QUANTITY;
+  const bagFull = !cartItem && items.length >= MAX_CART_ITEMS;
 
   function handleAddToCart() {
-    if (atLimit) return;
+    if (atLimit || bagFull) return;
 
     addItem(product);
     setAdded(true);
@@ -43,16 +45,16 @@ export function AddToCartButton({
         type="button"
         className="button dark full-button"
         onClick={handleAddToCart}
-        disabled={atLimit}
+        disabled={atLimit || bagFull}
         style={{
-          cursor: atLimit ? "not-allowed" : "pointer",
+          cursor: atLimit || bagFull ? "not-allowed" : "pointer",
         }}
       >
         <ShoppingBag size={17} strokeWidth={1.5} />
 
         {atLimit
           ? "Maximum quantity in bag"
-          : "Add to Bag"}
+          : bagFull ? "Shopping bag is full" : "Add to Bag"}
       </button>
 
       {added && (

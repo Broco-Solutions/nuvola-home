@@ -1,19 +1,19 @@
 
 import Stripe from "stripe";
 import { getProductBySlug } from "@/data/products";
+import { getCheckoutConfiguration, getApprovedProductSlugs } from "@/lib/commerce-config";
+import { MAX_CART_ITEMS, MAX_CART_QUANTITY } from "@/lib/cart";
 
 export const runtime = "nodejs";
 
-const MAX_ITEMS = 50;
-const MAX_QUANTITY = 99;
+const MAX_ITEMS = MAX_CART_ITEMS;
+const MAX_QUANTITY = MAX_CART_QUANTITY;
 const MAX_BODY_SIZE = 16_384;
 
 type CartItemInput = {
   slug: string;
   quantity: number;
 };
-
-type FulfillmentMode = "pickup" | "shipping";
 
 function jsonError(message: string, status: number) {
   return Response.json(
@@ -41,6 +41,7 @@ function isCartItem(value: unknown): value is CartItemInput {
   return (
     typeof item.slug === "string" &&
     item.slug.length > 0 &&
+    item.slug.length <= 128 &&
     typeof item.quantity === "number" &&
     Number.isInteger(item.quantity) &&
     item.quantity >= 1 &&
@@ -48,108 +49,16 @@ function isCartItem(value: unknown): value is CartItemInput {
   );
 }
 
-function getApprovedProducts(): Set<string> {
-  return new Set(
-    (process.env.NUVOLA_APPROVED_PRODUCT_SLUGS ?? "")
-      .split(",")
-      .map((slug) => slug.trim())
-      .filter(Boolean),
-  );
-}
-
-function getFulfillmentMode(): FulfillmentMode | null {
-  const mode = process.env.NUVOLA_FULFILLMENT_MODE;
-
-  if (mode === "pickup" || mode === "shipping") {
-    return mode;
-  }
-
-  return null;
-}
-
 export async function POST(request: Request) {
-  // Never start real payments from a development server.
-  if (
-    process.env.NODE_ENV !== "production" ||
-    process.env.STRIPE_LIVE_CHECKOUT_ENABLED !== "true"
-  ) {
+  const configuration = getCheckoutConfiguration();
+  if (!configuration) {
     return jsonError(
       "Online checkout is temporarily unavailable.",
       503,
     );
   }
 
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-
-  if (
-    !secretKey?.startsWith("sk_live_") ||
-    !webhookSecret?.startsWith("whsec_")
-  ) {
-    console.error("Stripe Live configuration is incomplete.");
-
-    return jsonError(
-      "Payment configuration is unavailable.",
-      503,
-    );
-  }
-
-  if (process.env.STRIPE_TAX_READY !== "true") {
-    return jsonError(
-      "Tax configuration is not ready.",
-      503,
-    );
-  }
-
-  const fulfillmentMode = getFulfillmentMode();
-
-  if (!fulfillmentMode) {
-    return jsonError(
-      "Delivery or pickup must be configured.",
-      503,
-    );
-  }
-
-  const shippingRateId =
-    process.env.NUVOLA_SHIPPING_RATE_ID?.trim();
-
-  if (
-    fulfillmentMode === "shipping" &&
-    !shippingRateId?.startsWith("shr_")
-  ) {
-    return jsonError(
-      "Shipping is not configured.",
-      503,
-    );
-  }
-
-  const siteUrl = process.env.NUVOLA_SITE_URL;
-
-  let siteOrigin: string;
-
-  try {
-    if (!siteUrl) throw new Error("Missing URL");
-
-    const parsed = new URL(siteUrl);
-
-    if (
-      parsed.protocol !== "https:" ||
-      parsed.username ||
-      parsed.password ||
-      parsed.search ||
-      parsed.hash ||
-      parsed.pathname !== "/"
-    ) {
-      throw new Error("Invalid production URL");
-    }
-
-    siteOrigin = parsed.origin;
-  } catch {
-    return jsonError(
-      "Invalid production website configuration.",
-      503,
-    );
-  }
+  const { secretKey, siteOrigin, livemode } = configuration;
 
   // Browser requests must originate from the official site.
   if (request.headers.get("origin") !== siteOrigin) {
@@ -158,7 +67,7 @@ export async function POST(request: Request) {
 
   const contentType = request.headers.get("content-type");
 
-  if (!contentType?.startsWith("application/json")) {
+  if (contentType?.split(";")[0].trim().toLowerCase() !== "application/json") {
     return jsonError(
       "Content-Type must be application/json.",
       415,
@@ -171,6 +80,7 @@ export async function POST(request: Request) {
 
   if (
     !Number.isFinite(contentLength) ||
+    contentLength < 0 ||
     contentLength > MAX_BODY_SIZE
   ) {
     return jsonError("Request is too large.", 413);
@@ -181,7 +91,7 @@ export async function POST(request: Request) {
   try {
     const rawBody = await request.text();
 
-    if (rawBody.length > MAX_BODY_SIZE) {
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_BODY_SIZE) {
       return jsonError("Request is too large.", 413);
     }
 
@@ -209,7 +119,12 @@ export async function POST(request: Request) {
     return jsonError("Invalid cart size.", 400);
   }
 
-  const approvedProducts = getApprovedProducts();
+  const requestId = request.headers.get("idempotency-key");
+  if (!requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    return jsonError("Invalid checkout request ID.", 400);
+  }
+
+  const approvedProducts = getApprovedProductSlugs();
 
   if (approvedProducts.size === 0) {
     return jsonError(
@@ -268,7 +183,7 @@ export async function POST(request: Request) {
 
     totalCents += unitAmount * item.quantity;
 
-    if (!Number.isSafeInteger(totalCents)) {
+    if (!Number.isSafeInteger(totalCents) || totalCents > 99_999_999) {
       return jsonError("Invalid order amount.", 400);
     }
 
@@ -276,6 +191,7 @@ export async function POST(request: Request) {
       price_data: {
         currency: "usd",
         unit_amount: unitAmount,
+        tax_behavior: "exclusive",
         product_data: {
           name: product.name,
           description: product.shortDescription,
@@ -292,8 +208,9 @@ export async function POST(request: Request) {
     mode: "payment",
     ui_mode: "hosted_page",
 
-    // Only immediately confirmed card payments.
-    allowed_payment_method_types: ["card"],
+    // This filters Stripe's dynamic methods; disabled/ineligible BNPL methods
+    // are hidden by Stripe. Affirm and all other methods are excluded.
+    allowed_payment_method_types: ["card", "klarna", "afterpay_clearpay"],
 
     line_items: lineItems,
 
@@ -315,45 +232,34 @@ export async function POST(request: Request) {
 
     metadata: {
       website: "nuvola-home",
-      checkout_mode: "live",
-      fulfillment_mode: fulfillmentMode,
+      checkout_mode: livemode ? "live" : "test",
     },
 
     payment_intent_data: {
       metadata: {
         website: "nuvola-home",
-        fulfillment_mode: fulfillmentMode,
+        checkout_mode: livemode ? "live" : "test",
       },
     },
   };
-
-  if (fulfillmentMode === "shipping" && shippingRateId) {
-    params.shipping_address_collection = {
-      allowed_countries: ["US"],
-    };
-
-    params.shipping_options = [
-      {
-        shipping_rate: shippingRateId,
-      },
-    ];
-  }
 
   try {
     const stripe = new Stripe(secretKey);
 
     const session =
-      await stripe.checkout.sessions.create(params);
+      await stripe.checkout.sessions.create(params, {
+        idempotencyKey: `nuvola-checkout-${requestId}`,
+      });
 
-    if (!session.url || !session.livemode) {
+    if (!session.url || session.livemode !== livemode) {
       return jsonError(
-        "Unable to initialize live checkout.",
+        "Unable to initialize checkout.",
         502,
       );
     }
 
     return Response.json(
-      { url: session.url },
+      { url: session.url, sessionId: session.id },
       {
         headers: {
           "Cache-Control": "no-store",
@@ -363,9 +269,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error(
       "Nuvola checkout error:",
-      error instanceof Error
-        ? error.message
-        : "Unknown Stripe error",
+      error instanceof Stripe.errors.StripeError ? error.type : "Unknown Stripe error",
     );
 
     return jsonError(

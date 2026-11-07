@@ -188,7 +188,7 @@ export function Header({
                 style={{
                   position: "absolute",
                   top: -7,
-                  right: -8,
+                  right: 0,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
