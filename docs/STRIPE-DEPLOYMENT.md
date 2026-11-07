@@ -93,9 +93,12 @@ Verificaciones realizadas:
 | `pnpm typecheck` | Aprobado. |
 | `pnpm lint` | Aprobado, sin advertencias. |
 | `pnpm build` | Build de producción aprobado, tanto con configuración incompleta que bloquea compras como con configuración test de prueba. |
-| Edge local sobre el build de producción | Agregar/quitar, incrementar/decrementar, persistencia tras recarga, carrito vacío, camas bloqueadas, error de checkout con carrito conservado y éxito no verificable. Sin desborde horizontal a 1440/390/360 px. El endpoint local se bloqueó antes de llamar a Stripe. |
+| Rutas del build local | 39 rutas verificadas con HTTP 200, incluidos los 24 productos; una ruta inexistente devuelve HTTP 404. |
+| Edge local sobre el build de producción | Agregar/quitar, incrementar/decrementar, persistencia tras recarga, carrito vacío, camas bloqueadas, error de checkout con carrito conservado y éxito no verificable. Sin desborde horizontal a 1440/390/360 px. También navegación original, búsqueda global y del catálogo, filtros por ambiente, orden por precio, galería, enlace al showroom, menú móvil y crédito del footer. El endpoint local se bloqueó antes de llamar a Stripe. |
 
 Las credenciales ficticias usadas para las comprobaciones solo se pasaron al proceso local; `.env.local` no se editó. Las capturas de UI son artefactos locales ignorados por Git.
+
+La revisión final del último commit y del diff completo no encontró archivos eliminados. Se conservaron los scripts y dependencias originales; el catálogo, recursos visuales, páginas informativas, búsqueda, filtros y atribuciones no se modificaron. El código retirado de pagos corresponde a los requisitos de envío solicitados o a lógica trasladada a funciones compartidas y cubierta por pruebas. Se revisaron ambos commits de la rama para detectar secretos y archivos privados: solo se agregó `.env.example`, una plantilla sin credenciales. Las instrucciones preexistentes del repositorio se conservaron.
 
 Pendiente al entregar: credenciales de sandbox y signing secret, activación/elegibilidad de métodos, configuración fiscal real, aprobación de precios/productos y prueba de Checkout alojado + webhook en un entorno configurado. El entorno local disponible tenía una clave live, sin signing secret ni productos autorizados; sus valores no se modificaron ni se publicaron.
 
