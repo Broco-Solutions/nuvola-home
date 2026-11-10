@@ -1,6 +1,21 @@
 # Stripe Checkout — entrega para Tomás
 
-Estado de esta revisión (7 de noviembre de 2026): código y verificaciones locales completos; validación de extremo a extremo en sandbox pendiente. El PR debe permanecer **draft** hasta completar esa validación. No se modificó Vercel/Stripe ni se crearon sesiones o cobros reales.
+Estado de esta revisión (10 de noviembre de 2026): código listo para revisión y verificaciones locales completas; validación de extremo a extremo en sandbox pendiente. El PR se entrega como **draft** para señalar ese requisito antes de habilitar pagos reales. No se modificó Vercel/Stripe ni se crearon sesiones o cobros reales.
+
+## Revalidación de entrega — 10 de noviembre de 2026
+
+- `git fetch origin --prune` confirmó que `feature/stripe-checkout` contiene todo `origin/main`; no fue necesario incorporar cambios de otros desarrolladores. La rama ya estaba subida hasta `8c3e422` y el árbol de trabajo estaba limpio. La consulta autenticada de GitHub no encontró un PR anterior para esta rama y confirmó permiso de escritura del colaborador.
+- `pnpm typecheck`, `pnpm lint` y las **37 pruebas** de `pnpm test:commerce` pasaron nuevamente. `pnpm build` pasó con la configuración local incompleta y también con datos ficticios test pasados solamente al proceso, sin editar `.env.local`.
+- Sobre este último build, **40 rutas** respondieron HTTP 200 y una ruta inexistente respondió 404. Los endpoints de checkout y webhook respondieron 503 cuando faltaba su configuración; no se contactó a Stripe. La inspección de los **16 archivos JavaScript de cliente** generados no encontró claves privadas ni secretos de webhook, incluidos los valores ficticios de prueba.
+- Edge sin ventana comprobó agregar/quitar productos, incrementar/decrementar cantidades, persistencia tras recarga, carrito vacío, recuperación tras error de checkout, bloqueo de camas y rechazo de una confirmación sin sesión verificable. Sin desborde horizontal ni contador recortado a 1440/390/360 px. También pasaron navegación, búsqueda global y del catálogo, filtros, orden por precio, galería, showroom, menú móvil y crédito del footer.
+- La revisión del diff y del historial no detectó secretos ni archivos privados; `.env.example` es la única plantilla de entorno versionada. Se conservaron los recursos, el catálogo, las páginas informativas y los scripts/dependencias originales. Esta revalidación no requirió cambiar la lógica de pagos.
+- Las lecturas HTTPS públicas devolvieron 200 para ambos dominios y terminaron en **`https://www.nuvola-home.com/`**. `/cart` devolvió **404** en ese dominio. Por lo tanto, la integración todavía no está visible en producción. Usar `NUVOLA_SITE_URL=https://www.nuvola-home.com` mientras esta sea la redirección canónica; no copiar el dominio sin `www` de la configuración de metadatos como origen de Checkout.
+
+### Límites de acceso y publicación
+
+Tomás ya cargó claves API en Vercel según el contexto recibido: **no se solicita volver a cargarlas**. No se dispone de una conexión autenticada a los proyectos privados de Vercel ni a Stripe, por lo que no se pudo confirmar la presencia, modo o alcance de esas variables, el signing secret, Stripe Tax, los métodos de pago ni el webhook registrado. La configuración **local** tiene una clave live pero carece de signing secret y productos autorizados; esto no describe ni demuestra la configuración de Vercel. La clave local no se usó para llamadas a Stripe.
+
+Antes de quitar el draft: completar una compra test de esta aplicación y verificar su webhook en sandbox/preview, conforme a la lista de aceptación de este documento. Antes de habilitar live: Tomás debe verificar las cinco variables de servidor de la tabla siguiente, aprobar los productos y precios, y confirmar impuestos, atención manual de pedidos y destino del webhook. La fusión a `main` publicará automáticamente solo si el proyecto Vercel está conectado a este repositorio y tiene `main` como Production Branch; ese ajuste privado no pudo comprobarse. De lo contrario, Tomás deberá iniciar el deployment correspondiente desde Vercel. Después debe revisar el deployment, el dominio y el carrito público. No se hizo merge, push a `main` ni publicación de producción desde esta revisión.
 
 ## Variables exactas en Vercel
 
