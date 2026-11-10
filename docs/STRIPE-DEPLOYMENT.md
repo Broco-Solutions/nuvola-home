@@ -1,6 +1,6 @@
 # Stripe Checkout — entrega para Tomás
 
-Estado de esta revisión (10 de noviembre de 2026): código listo para revisión y verificaciones locales completas; validación de extremo a extremo en sandbox pendiente. El PR se entrega como **draft** para señalar ese requisito antes de habilitar pagos reales. No se modificó Vercel/Stripe ni se crearon sesiones o cobros reales.
+Estado de esta revisión (10 de noviembre de 2026): código listo para revisión y verificaciones locales completas; validación de extremo a extremo en sandbox pendiente. El [PR #1](https://github.com/Broco-Solutions/nuvola-home/pull/1) se entrega como **draft** para señalar ese requisito antes de habilitar pagos reales. No se modificó la configuración de Vercel/Stripe ni se crearon sesiones o cobros reales.
 
 ## Revalidación de entrega — 10 de noviembre de 2026
 
@@ -14,6 +14,10 @@ Estado de esta revisión (10 de noviembre de 2026): código listo para revisión
 ### Límites de acceso y publicación
 
 Tomás ya cargó claves API en Vercel según el contexto recibido: **no se solicita volver a cargarlas**. No se dispone de una conexión autenticada a los proyectos privados de Vercel ni a Stripe, por lo que no se pudo confirmar la presencia, modo o alcance de esas variables, el signing secret, Stripe Tax, los métodos de pago ni el webhook registrado. La configuración **local** tiene una clave live pero carece de signing secret y productos autorizados; esto no describe ni demuestra la configuración de Vercel. La clave local no se usó para llamadas a Stripe.
+
+El push de la rama se completó y se creó el [PR #1: `feature/stripe-checkout` → `main`](https://github.com/Broco-Solutions/nuvola-home/pull/1). La descripción se conserva en `docs/STRIPE-PULL-REQUEST.md`. Mantener el draft hasta completar la aceptación de sandbox.
+
+La consulta autenticada de GitHub confirmó que Vercel registra producción desde `main` (`a67de01`) y un [preview exitoso de Stripe](https://nuvola-home-quyjyzdvh-broco-solutions.vercel.app/) (`961159c`). Ambos commits tienen el estado Vercel exitoso. Esto confirma que la integración Vercel/GitHub está activa y explica por qué la rama de Stripe todavía no aparece en producción; no confirma las variables privadas ni una compra real en ese preview.
 
 Antes de quitar el draft: completar una compra test de esta aplicación y verificar su webhook en sandbox/preview, conforme a la lista de aceptación de este documento. Antes de habilitar live: Tomás debe verificar las cinco variables de servidor de la tabla siguiente, aprobar los productos y precios, y confirmar impuestos, atención manual de pedidos y destino del webhook. La fusión a `main` publicará automáticamente solo si el proyecto Vercel está conectado a este repositorio y tiene `main` como Production Branch; ese ajuste privado no pudo comprobarse. De lo contrario, Tomás deberá iniciar el deployment correspondiente desde Vercel. Después debe revisar el deployment, el dominio y el carrito público. No se hizo merge, push a `main` ni publicación de producción desde esta revisión.
 
