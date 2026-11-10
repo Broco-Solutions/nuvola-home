@@ -1,5 +1,7 @@
+
 import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Manrope } from "next/font/google";
+import { CartProvider } from "@/components/cart-provider";
 import { Footer } from "@/components/footer";
 import type { SearchProduct } from "@/components/global-search";
 import { Header } from "@/components/header";
@@ -8,9 +10,20 @@ import { ScrollMotion } from "@/components/scroll-motion";
 import { siteConfig } from "@/config/site";
 import { products } from "@/data/products";
 import "./globals.css";
+import "./commerce-fixes.css";
 
-const sans = Manrope({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
-const display = Cormorant_Garamond({ subsets: ["latin"], variable: "--font-display", weight: ["400", "500"], display: "swap" });
+const sans = Manrope({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
+
+const display = Cormorant_Garamond({
+  subsets: ["latin"],
+  variable: "--font-display",
+  weight: ["400", "500"],
+  display: "swap",
+});
 
 const searchProducts: SearchProduct[] = products.map((product) => ({
   id: product.id,
@@ -26,7 +39,10 @@ const searchProducts: SearchProduct[] = products.map((product) => ({
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteConfig.url),
-  title: { default: "Nuvola Home | Contemporary Furniture Miami", template: "%s | Nuvola Home" },
+  title: {
+    default: "Nuvola Home | Contemporary Furniture Miami",
+    template: "%s | Nuvola Home",
+  },
   description: siteConfig.description,
   alternates: { canonical: "/" },
   openGraph: {
@@ -36,18 +52,41 @@ export const metadata: Metadata = {
     locale: "en_US",
     siteName: siteConfig.businessName,
     url: "/",
-    images: [{ url: "/products/forma-sectional-sofa-off-white/02.webp", width: 1500, height: 1500 }],
+    images: [
+      {
+        url: "/products/forma-sectional-sofa-off-white/02.webp",
+        width: 1500,
+        height: 1500,
+      },
+    ],
   },
-  twitter: { card: "summary_large_image", title: "Nuvola Home", description: siteConfig.description },
+  twitter: {
+    card: "summary_large_image",
+    title: "Nuvola Home",
+    description: siteConfig.description,
+  },
   icons: {
-    icon: [{ url: "/brand/favicon.svg", type: "image/svg+xml" }],
+    icon: [
+      {
+        url: "/brand/favicon.svg",
+        type: "image/svg+xml",
+      },
+    ],
     shortcut: "/brand/favicon.svg",
   },
 };
 
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#f4f1ea" };
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#f4f1ea",
+};
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   const structuredData = {
     "@context": "https://schema.org",
     "@type": ["FurnitureStore", "LocalBusiness"],
@@ -72,15 +111,37 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   };
 
   return (
-    <html lang="en" className={`${sans.variable} ${display.variable}`} data-scroll-behavior="smooth">
+    <html
+      lang="en"
+      className={`${sans.variable} ${display.variable}`}
+      data-scroll-behavior="smooth"
+    >
       <body>
-        <a className="skip-link" href="#main-content">Skip to content</a>
-        <Header searchProducts={searchProducts} />
-        <main id="main-content">{children}</main>
-        <PersistentVisit />
-        <Footer />
-        <ScrollMotion />
-        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} />
+        <CartProvider>
+          <a className="skip-link" href="#main-content">
+            Skip to content
+          </a>
+
+          <Header searchProducts={searchProducts} />
+
+          <main id="main-content">{children}</main>
+
+          <PersistentVisit />
+
+          <Footer />
+
+          <ScrollMotion />
+        </CartProvider>
+
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(structuredData).replace(
+              /</g,
+              "\\u003c",
+            ),
+          }}
+        />
       </body>
     </html>
   );

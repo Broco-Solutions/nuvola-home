@@ -1,0 +1,140 @@
+
+/*
+ * Nuvola Home — Commerce UI fixes
+ * Adjustments for cart integration.
+ * Original design styles remain unchanged.
+ */
+
+/* ========================================
+   HEADER — DESKTOP
+======================================== */
+
+.header-inner {
+  grid-template-columns:
+    210px
+    minmax(0, 1fr)
+    44px
+    44px;
+}
+
+.header-inner > .wordmark {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.header-inner > .desktop-nav {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.header-inner > .search-trigger {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: center;
+}
+
+.header-inner > .cart-trigger {
+  grid-column: 4;
+  grid-row: 1;
+  justify-self: center;
+  margin-left: 0 !important;
+}
+
+.cart-trigger:hover,
+.cart-trigger[aria-current="page"] {
+  color: var(--sage);
+}
+
+/* ========================================
+   PRODUCT ACTIONS
+======================================== */
+
+.product-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 17px;
+}
+
+.product-actions > div {
+  width: 100%;
+  min-width: 0;
+}
+
+.product-actions > .directions-link {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  gap: 10px;
+  line-height: 1.5;
+}
+
+.product-actions > .directions-link:hover {
+  color: var(--sage);
+}
+
+/* ========================================
+   TABLET
+======================================== */
+
+@media (max-width: 1120px) {
+  .header-inner {
+    grid-template-columns:
+      170px
+      minmax(0, 1fr)
+      44px
+      44px;
+  }
+
+  .desktop-nav {
+    gap: clamp(9px, 1.3vw, 17px);
+  }
+}
+
+/* ========================================
+   MOBILE HEADER
+======================================== */
+
+@media (max-width: 840px) {
+  .header-inner {
+    grid-template-columns:
+      44px
+      minmax(0, 1fr)
+      44px
+      44px;
+  }
+
+  .header-inner > .mobile-only {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .header-inner > .wordmark {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: center;
+  }
+
+  .header-inner > .search-trigger {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .header-inner > .cart-trigger {
+    grid-column: 4;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 400px) {
+  .header-inner .brand-wordmark {
+    width: clamp(130px, 41vw, 172px);
+  }
+
+  .product-actions {
+    gap: 15px;
+  }
+}
