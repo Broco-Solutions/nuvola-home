@@ -20,6 +20,7 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 type PageProps = {
   searchParams: Promise<{

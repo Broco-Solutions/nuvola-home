@@ -14,13 +14,8 @@ import {
 } from "lucide-react";
 import { useCart } from "@/components/cart-provider";
 import { formatPrice } from "@/data/products";
+import { requestCheckout } from "@/lib/checkout-client";
 import styles from "./cart.module.css";
-
-type CheckoutResponse = {
-  url?: string;
-  sessionId?: string;
-  error?: string;
-};
 
 export default function CartPage() {
   const {
@@ -65,44 +60,9 @@ export default function CartPage() {
       if (checkoutRequest.current?.cart !== body) {
         checkoutRequest.current = { cart: body, id: crypto.randomUUID() };
       }
-      const response = await fetch("/api/checkout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": checkoutRequest.current.id,
-        },
-        body,
-      });
-
-      const data: CheckoutResponse = await response
-        .json()
-        .catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(
-          typeof data.error === "string"
-            ? data.error
-            : "Unable to initialize checkout.",
-        );
-      }
-
-      if (typeof data.url !== "string" || typeof data.sessionId !== "string" ||
-        !/^cs_(?:test|live)_[A-Za-z0-9]+$/.test(data.sessionId)) {
-        throw new Error("Invalid checkout response.");
-      }
-
-      const checkoutUrl = new URL(data.url);
-
-      if (
-        checkoutUrl.protocol !== "https:" ||
-        checkoutUrl.hostname !== "checkout.stripe.com" ||
-        checkoutUrl.username || checkoutUrl.password || checkoutUrl.port
-      ) {
-        throw new Error("Invalid checkout destination.");
-      }
-
+      const data = await requestCheckout(purchased, checkoutRequest.current.id);
       rememberCheckout(data.sessionId, purchased);
-      window.location.assign(checkoutUrl.href);
+      window.location.assign(data.url);
     } catch (error) {
       setCheckoutError(
         error instanceof Error

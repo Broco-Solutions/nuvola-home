@@ -3,8 +3,10 @@ import Stripe from "stripe";
 import { getProductBySlug } from "@/data/products";
 import { getCheckoutConfiguration, getApprovedProductSlugs } from "@/lib/commerce-config";
 import { MAX_CART_ITEMS, MAX_CART_QUANTITY } from "@/lib/cart";
+import { createStripeClient } from "@/lib/stripe-client";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 const MAX_ITEMS = MAX_CART_ITEMS;
 const MAX_QUANTITY = MAX_CART_QUANTITY;
@@ -244,7 +246,7 @@ export async function POST(request: Request) {
   };
 
   try {
-    const stripe = new Stripe(secretKey);
+    const stripe = createStripeClient(secretKey);
 
     const session =
       await stripe.checkout.sessions.create(params, {

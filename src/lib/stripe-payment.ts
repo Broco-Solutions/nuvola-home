@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { getStripeConfiguration } from "@/lib/commerce-config";
+import { createStripeClient } from "@/lib/stripe-client";
 
 export type PaymentStatus = "paid" | "pending" | "failed" | "unavailable";
 
@@ -26,7 +27,7 @@ export async function getCheckoutResult(sessionId: string | undefined): Promise<
     !sessionId.startsWith(configuration.livemode ? "cs_live_" : "cs_test_")) return "unavailable";
 
   try {
-    const stripe = new Stripe(configuration.secretKey);
+    const stripe = createStripeClient(configuration.secretKey);
     const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ["payment_intent"] });
     return isNuvolaSession(session, configuration.livemode) ? getPaymentStatus(session) : "unavailable";
   } catch {
