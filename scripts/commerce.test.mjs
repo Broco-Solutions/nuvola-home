@@ -8,6 +8,7 @@ import { products } from "@/data/products";
 import { getCheckoutConfiguration, isProductApproved } from "@/lib/commerce-config";
 import { normalizeCart, subtractPurchasedItems, toCartItem } from "@/lib/cart";
 import { getCheckoutResult } from "@/lib/stripe-payment";
+import { requestCheckout } from "@/lib/checkout-client";
 import { CartProvider, useCart } from "@/components/cart-provider";
 import { POST as checkout } from "@/app/api/checkout/route";
 import { POST as webhook } from "@/app/api/stripe/webhook/route";
@@ -303,4 +304,52 @@ test("cart actions, checkout snapshots and repeated success visits preserve a ne
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
   }
+});
+
+test("a stalled checkout times out and the same request can be retried safely", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const attempts = [];
+  mock.method(globalThis, "fetch", async (_url, options) => {
+    attempts.push(options);
+    if (attempts.length === 1) {
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    }
+    return Response.json({ url: "https://checkout.stripe.com/c/pay/cs_test_retry", sessionId: "cs_test_retry" });
+  });
+  const items = [{ slug: product.slug, quantity: 2 }];
+  const id = randomUUID();
+  const timeout = assert.rejects(requestCheckout(items, id), /Your bag is saved. Please try again/);
+  t.mock.timers.tick(35_000);
+  await timeout;
+  assert.equal(attempts[0].signal.aborted, true);
+  assert.equal((await requestCheckout(items, id)).sessionId, "cs_test_retry");
+  assert.equal(attempts[0].headers["Idempotency-Key"], id);
+  assert.equal(attempts[1].headers["Idempotency-Key"], id);
+  assert.equal(attempts[0].body, attempts[1].body);
+});
+
+test("checkout redirects reject malformed responses and unsafe destinations", async () => {
+  for (const data of [
+    null, [], {},
+    { url: "https://checkout.stripe.com/pay", sessionId: "invalid" },
+    ...[
+      "http://checkout.stripe.com/pay",
+      "https://attacker.example/pay",
+      "https://checkout.stripe.com.attacker.example/pay",
+      "https://user:pass@checkout.stripe.com/pay",
+      "https://checkout.stripe.com:8443/pay",
+    ].map((url) => ({ url, sessionId: "cs_test_redirect" })),
+  ]) {
+    mock.method(globalThis, "fetch", async () => Response.json(data));
+    await assert.rejects(requestCheckout([], randomUUID()), /Invalid checkout/);
+  }
+});
+
+test("checkout failures preserve useful errors and tolerate non-JSON responses", async () => {
+  mock.method(globalThis, "fetch", async () => Response.json({ error: "Online checkout is temporarily unavailable." }, { status: 503 }));
+  await assert.rejects(requestCheckout([], randomUUID()), /Online checkout is temporarily unavailable/);
+  mock.method(globalThis, "fetch", async () => new Response("Gateway timeout", { status: 504 }));
+  await assert.rejects(requestCheckout([], randomUUID()), /Unable to initialize checkout/);
 });

@@ -2,8 +2,10 @@
 import Stripe from "stripe";
 import { getStripeConfiguration } from "@/lib/commerce-config";
 import { getPaymentStatus, isNuvolaSession } from "@/lib/stripe-payment";
+import { createStripeClient } from "@/lib/stripe-client";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   const configuration = getStripeConfiguration();
@@ -28,7 +30,7 @@ export async function POST(request: Request) {
   }
 
   let event: Stripe.Event;
-  const stripe = new Stripe(configuration.secretKey);
+  const stripe = createStripeClient(configuration.secretKey);
 
   try {
     const rawBody = await request.text();
