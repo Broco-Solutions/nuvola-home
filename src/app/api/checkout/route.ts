@@ -1,7 +1,7 @@
 
 import Stripe from "stripe";
 import { getProductBySlug } from "@/data/products";
-import { getCheckoutConfiguration, getApprovedProductSlugs } from "@/lib/commerce-config";
+import { getCheckoutConfiguration, getApprovedProductSlugs, isProductApproved } from "@/lib/commerce-config";
 import { MAX_CART_ITEMS, MAX_CART_QUANTITY } from "@/lib/cart";
 import { createStripeClient } from "@/lib/stripe-client";
 
@@ -52,7 +52,7 @@ function isCartItem(value: unknown): value is CartItemInput {
 }
 
 export async function POST(request: Request) {
-  const configuration = getCheckoutConfiguration();
+  const configuration = getCheckoutConfiguration(request.url);
   if (!configuration) {
     return jsonError(
       "Online checkout is temporarily unavailable.",
@@ -183,6 +183,10 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!isProductApproved(product)) {
+      return jsonError("This product's price or availability requires confirmation.", 400);
+    }
+
     totalCents += unitAmount * item.quantity;
 
     if (!Number.isSafeInteger(totalCents) || totalCents > 99_999_999) {
@@ -210,9 +214,8 @@ export async function POST(request: Request) {
     mode: "payment",
     ui_mode: "hosted_page",
 
-    // This filters Stripe's dynamic methods; disabled/ineligible BNPL methods
-    // are hidden by Stripe. Affirm and all other methods are excluded.
-    allowed_payment_method_types: ["card", "klarna", "afterpay_clearpay"],
+    // Start with immediate-confirmation payments even when no webhook exists.
+    allowed_payment_method_types: ["card"],
 
     line_items: lineItems,
 
@@ -271,8 +274,14 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error(
       "Nuvola checkout error:",
-      error instanceof Stripe.errors.StripeError ? error.type : "Unknown Stripe error",
+      error instanceof Stripe.errors.StripeError
+        ? { type: error.type, code: error.code, param: error.param, requestId: error.requestId }
+        : "Unknown Stripe error",
     );
+
+    if (error instanceof Stripe.errors.StripeInvalidRequestError && error.param?.startsWith("automatic_tax")) {
+      return jsonError("Checkout is unavailable while tax settings are being completed. Please contact Nuvola Home.", 503);
+    }
 
     return jsonError(
       "We could not start checkout. Please try again later.",

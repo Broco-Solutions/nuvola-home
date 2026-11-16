@@ -1,17 +1,17 @@
 import type { Product } from "@/data/products";
+import { authorizedProducts } from "@/config/commerce";
+import { siteConfig } from "@/config/site";
 
 export function getApprovedProductSlugs(): Set<string> {
-  return new Set(
-    (process.env.NUVOLA_APPROVED_PRODUCT_SLUGS ?? "")
-      .split(",")
-      .map((slug) => slug.trim())
-      .filter(Boolean),
-  );
+  return new Set(authorizedProducts.map((product) => product.slug));
 }
 
 export function isProductApproved(product: Product): boolean {
   // The captured catalog has no selectable Queen/King variant.
-  return product.subcategory !== "Beds" && getApprovedProductSlugs().has(product.slug);
+  return product.subcategory !== "Beds" && authorizedProducts.some((approved) =>
+    approved.slug === product.slug && Number.isSafeInteger(approved.unitAmount) &&
+    approved.unitAmount >= 50 && approved.unitAmount === Math.round(product.price * 100),
+  );
 }
 
 export function getStripeConfiguration() {
@@ -20,36 +20,38 @@ export function getStripeConfiguration() {
 
   if (!secretKey || !match) return null;
 
-  return { secretKey, livemode: match[1] === "live" };
-}
-
-export function getCheckoutConfiguration() {
-  const stripe = getStripeConfiguration();
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
-
-  if (!stripe || !webhookSecret?.startsWith("whsec_")) return null;
-
-  // Test keys work locally and on previews. Live creation requires an explicit
-  // opt-in and must never run in next dev or a Vercel preview/development deploy.
-  if (stripe.livemode && (
+  const livemode = match[1] === "live";
+  if (livemode && (
     process.env.NODE_ENV !== "production" ||
-    process.env.STRIPE_LIVE_CHECKOUT_ENABLED !== "true" ||
-    (process.env.VERCEL_ENV !== undefined && process.env.VERCEL_ENV !== "production")
+    (process.env.VERCEL_ENV !== undefined && process.env.VERCEL_ENV !== "production") ||
+    (process.env.VERCEL === "1" && process.env.VERCEL_ENV !== "production")
   )) return null;
 
-  try {
-    const url = new URL(process.env.NUVOLA_SITE_URL ?? "");
-    const localTest = !stripe.livemode &&
-      url.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  return { secretKey, livemode };
+}
 
-    if (
-      (url.protocol !== "https:" && !localTest) ||
-      url.username || url.password || url.search || url.hash || url.pathname !== "/"
-    ) return null;
+function isTestOrigin(url: URL): boolean {
+  if (process.env.NODE_ENV !== "production" && url.protocol === "http:" &&
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return true;
 
-    return { ...stripe, siteOrigin: url.origin };
-  } catch {
-    return null;
+  // Trust deployment URLs supplied by Vercel, never an arbitrary Host/Origin.
+  return url.protocol === "https:" && [process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL]
+    .some((host) => host && /^[a-z0-9-]+\.vercel\.app$/i.test(host) && url.host === host);
+}
+
+export function getCheckoutConfiguration(requestUrl?: string) {
+  const stripe = getStripeConfiguration();
+  if (!stripe) return null;
+
+  let siteOrigin: string = siteConfig.url;
+  if (!stripe.livemode && requestUrl) {
+    try {
+      const url = new URL(requestUrl);
+      if (!url.username && !url.password && isTestOrigin(url)) siteOrigin = url.origin;
+    } catch {
+      return null;
+    }
   }
+
+  return { ...stripe, siteOrigin };
 }
