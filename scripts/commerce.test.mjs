@@ -5,6 +5,8 @@ import Stripe from "stripe";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { products } from "@/data/products";
+import { authorizedProducts } from "@/config/commerce";
+import { siteConfig } from "@/config/site";
 import { getCheckoutConfiguration, isProductApproved } from "@/lib/commerce-config";
 import { normalizeCart, subtractPurchasedItems, toCartItem } from "@/lib/cart";
 import { getCheckoutResult } from "@/lib/stripe-payment";
@@ -15,23 +17,25 @@ import { POST as webhook } from "@/app/api/stripe/webhook/route";
 
 const product = products.find((item) => item.subcategory !== "Beds");
 const bed = products.find((item) => item.subcategory === "Beds");
-const origin = "https://preview.example.com";
+const origin = "https://nuvola-test.vercel.app";
 const webhookSecret = "whsec_localfixture";
 const stripe = new Stripe("sk_test_localfixture");
 const sessions = Object.getPrototypeOf(stripe.checkout.sessions);
 const originalEnv = { ...process.env };
+const originalAuthorizedProducts = [...authorizedProducts];
 
 beforeEach(() => {
   Object.assign(process.env, {
     NODE_ENV: "test",
+    VERCEL: "1",
     VERCEL_ENV: "preview",
+    VERCEL_URL: "nuvola-test.vercel.app",
+    VERCEL_BRANCH_URL: "nuvola-test-branch.vercel.app",
     STRIPE_SECRET_KEY: "sk_test_localfixture",
     STRIPE_WEBHOOK_SECRET: webhookSecret,
-    NUVOLA_SITE_URL: origin,
-    NUVOLA_APPROVED_PRODUCT_SLUGS: product.slug,
-    STRIPE_LIVE_CHECKOUT_ENABLED: "false",
-    STRIPE_TAX_READY: "false",
   });
+  // Fixture approvals exist only in this isolated process, never in production.
+  authorizedProducts.splice(0, authorizedProducts.length, { slug: product.slug, unitAmount: Math.round(product.price * 100) });
   // A missed mock fails immediately instead of reaching any Stripe API.
   mock.method(sessions, "create", () => { throw new Error("Unexpected Stripe create"); });
   mock.method(sessions, "retrieve", () => { throw new Error("Unexpected Stripe retrieve"); });
@@ -41,6 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
   mock.restoreAll();
+  authorizedProducts.splice(0, authorizedProducts.length, ...originalAuthorizedProducts);
   for (const key of Object.keys(process.env)) if (!(key in originalEnv)) delete process.env[key];
   Object.assign(process.env, originalEnv);
 });
@@ -74,52 +79,70 @@ function eventRequest(type, checkoutSession = session(), { signature, timestamp,
   });
 }
 
-test("test Checkout does not require live opt-in, shipping or a tax-ready assertion", () => {
-  delete process.env.NUVOLA_FULFILLMENT_MODE;
-  delete process.env.NUVOLA_SHIPPING_RATE_ID;
+test("STRIPE_SECRET_KEY is the only required application environment variable", () => {
+  for (const name of ["STRIPE_WEBHOOK_SECRET", "NUVOLA_SITE_URL", "NUVOLA_APPROVED_PRODUCT_SLUGS", "STRIPE_LIVE_CHECKOUT_ENABLED"]) delete process.env[name];
   assert.equal(getCheckoutConfiguration().livemode, false);
+  assert.equal(getCheckoutConfiguration().siteOrigin, siteConfig.url);
   process.env.STRIPE_SECRET_KEY = "rk_test_localfixture";
   assert.equal(getCheckoutConfiguration().livemode, false);
 });
 
-test("live Checkout requires production, an explicit opt-in and no preview environment", () => {
+test("live keys work in production without an opt-in and are rejected in development/Preview", () => {
   process.env.STRIPE_SECRET_KEY = "sk_live_localfixture";
   assert.equal(getCheckoutConfiguration(), null);
   process.env.NODE_ENV = "production";
-  process.env.STRIPE_LIVE_CHECKOUT_ENABLED = "true";
   assert.equal(getCheckoutConfiguration(), null);
   process.env.VERCEL_ENV = "production";
   assert.equal(getCheckoutConfiguration().livemode, true);
+  assert.equal(getCheckoutConfiguration("https://attacker.example/api/checkout").siteOrigin, siteConfig.url);
   process.env.STRIPE_LIVE_CHECKOUT_ENABLED = "false";
+  assert.equal(getCheckoutConfiguration().livemode, true);
+  process.env.VERCEL_ENV = "development";
   assert.equal(getCheckoutConfiguration(), null);
+  delete process.env.VERCEL_ENV;
+  assert.equal(getCheckoutConfiguration(), null);
+  delete process.env.VERCEL;
+  assert.equal(getCheckoutConfiguration().livemode, true);
 });
 
-for (const url of ["https://user:pass@example.com", "https://example.com/path", "https://example.com?x=1", "https://example.com/#x", "http://example.com", "bad-url"]) {
-  test(`rejects unsafe site origin: ${url}`, () => {
+for (const url of ["https://user:pass@example.com", "https://example.com/path", "https://example.com?x=1", "https://example.com/#x", "http://example.com", "https://nuvola-test.vercel.app.attacker.example"]) {
+  test(`does not trust unrecognized request origins: ${url}`, () => {
     process.env.NUVOLA_SITE_URL = url;
-    assert.equal(getCheckoutConfiguration(), null);
+    assert.equal(getCheckoutConfiguration(url).siteOrigin, siteConfig.url);
   });
 }
 
-test("localhost HTTP is allowed only with test keys", () => {
-  process.env.NUVOLA_SITE_URL = "http://localhost:3000";
-  assert.equal(getCheckoutConfiguration().siteOrigin, "http://localhost:3000");
-  Object.assign(process.env, { STRIPE_SECRET_KEY: "sk_live_localfixture", NODE_ENV: "production", VERCEL_ENV: "production", STRIPE_LIVE_CHECKOUT_ENABLED: "true" });
+test("test redirects use only loopback or Vercel-supplied origins", () => {
+  assert.equal(getCheckoutConfiguration("http://localhost:3000/api/checkout").siteOrigin, "http://localhost:3000");
+  assert.equal(getCheckoutConfiguration(origin + "/api/checkout").siteOrigin, origin);
+  assert.equal(getCheckoutConfiguration("https://nuvola-test-branch.vercel.app/api/checkout").siteOrigin, "https://nuvola-test-branch.vercel.app");
+  assert.equal(getCheckoutConfiguration("https://another-project.vercel.app/api/checkout").siteOrigin, siteConfig.url);
+  process.env.VERCEL_URL = "attacker.example";
+  assert.equal(getCheckoutConfiguration("https://attacker.example/api/checkout").siteOrigin, siteConfig.url);
+  process.env.STRIPE_SECRET_KEY = "sk_live_localfixture";
   assert.equal(getCheckoutConfiguration(), null);
 });
 
-test("requires webhook configuration and does not auto-approve catalog products or beds", async () => {
+test("coded approvals reject beds, price drift and environment-based authorization", async () => {
   assert.equal(isProductApproved(product), true);
-  process.env.NUVOLA_APPROVED_PRODUCT_SLUGS = bed.slug;
+  authorizedProducts.push({ slug: bed.slug, unitAmount: Math.round(bed.price * 100) });
   assert.equal(isProductApproved(bed), false);
   assert.equal((await checkout(request({ items: [{ slug: bed.slug, quantity: 1 }] }))).status, 400);
-  process.env.NUVOLA_APPROVED_PRODUCT_SLUGS = "";
+  const savedPrice = product.price;
+  try {
+    product.price += 1;
+    assert.equal(isProductApproved(product), false);
+    assert.equal((await checkout(request())).status, 400);
+  } finally {
+    product.price = savedPrice;
+  }
+  authorizedProducts.splice(0);
+  process.env.NUVOLA_APPROVED_PRODUCT_SLUGS = products.map((item) => item.slug).join(",");
   assert.equal((await checkout(request())).status, 503);
-  process.env.STRIPE_WEBHOOK_SECRET = "";
-  assert.equal((await checkout(request())).status, 503);
+  assert.equal(sessions.create.mock.callCount(), 0);
 });
 
-test("uses backend prices, dynamic payment filtering, billing, Tax and idempotency without shipping", async () => {
+test("uses backend prices, cards, billing, Tax and idempotency without shipping", async () => {
   let parameters, options;
   mock.method(sessions, "create", async (params, opts) => {
     parameters = params; options = opts;
@@ -134,7 +157,7 @@ test("uses backend prices, dynamic payment filtering, billing, Tax and idempoten
   assert.equal(parameters.line_items[0].price_data.currency, "usd");
   assert.equal(parameters.line_items[0].quantity, 2);
   assert.equal(parameters.line_items[0].price_data.tax_behavior, "exclusive");
-  assert.deepEqual(parameters.allowed_payment_method_types, ["card", "klarna", "afterpay_clearpay"]);
+  assert.deepEqual(parameters.allowed_payment_method_types, ["card"]);
   assert.equal(parameters.payment_method_types, undefined);
   assert.equal(parameters.shipping_address_collection, undefined);
   assert.equal(parameters.shipping_options, undefined);
@@ -145,6 +168,62 @@ test("uses backend prices, dynamic payment filtering, billing, Tax and idempoten
   assert.equal(parameters.success_url, origin + "/checkout/success?session_id={CHECKOUT_SESSION_ID}");
   assert.equal(parameters.cancel_url, origin + "/cart");
   assert.equal(options.idempotencyKey, `nuvola-checkout-${id}`);
+});
+
+test("production creates card sessions using only STRIPE_SECRET_KEY, without a webhook", async () => {
+  Object.assign(process.env, { STRIPE_SECRET_KEY: "sk_live_localfixture", NODE_ENV: "production", VERCEL_ENV: "production" });
+  for (const name of ["STRIPE_WEBHOOK_SECRET", "NUVOLA_SITE_URL", "NUVOLA_APPROVED_PRODUCT_SLUGS", "STRIPE_LIVE_CHECKOUT_ENABLED"]) delete process.env[name];
+  let parameters;
+  mock.method(sessions, "create", async (params) => {
+    parameters = params;
+    return session({ livemode: true, id: "cs_live_localfixture", url: "https://checkout.stripe.com/pay" });
+  });
+  const response = await checkout(new Request(siteConfig.url + "/api/checkout", {
+    method: "POST", headers: { origin: siteConfig.url, "content-type": "application/json", "idempotency-key": randomUUID() },
+    body: JSON.stringify({ items: [{ slug: product.slug, quantity: 1 }] }),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(parameters.allowed_payment_method_types, ["card"]);
+  assert.equal(parameters.automatic_tax.enabled, true);
+  assert.equal(parameters.success_url, siteConfig.url + "/checkout/success?session_id={CHECKOUT_SESSION_ID}");
+  assert.equal(parameters.cancel_url, siteConfig.url + "/cart");
+  assert.equal((await webhook(eventRequest("checkout.session.completed"))).status, 503);
+});
+
+test("a rejected Tax configuration never retries without automatic tax", async () => {
+  mock.method(sessions, "create", async () => { throw new Stripe.errors.StripeInvalidRequestError({
+    message: "Tax settings are incomplete", param: "automatic_tax[enabled]",
+  }); });
+  const response = await checkout(request());
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /tax settings/);
+  assert.equal(sessions.create.mock.callCount(), 1);
+  assert.equal(sessions.create.mock.calls[0].arguments[0].automatic_tax.enabled, true);
+});
+
+test("live credentials cannot be used for API confirmation or webhooks on Preview", async () => {
+  process.env.STRIPE_SECRET_KEY = "sk_live_localfixture";
+  assert.equal(await getCheckoutResult("cs_live_localfixture"), "unavailable");
+  assert.equal((await webhook(eventRequest("checkout.session.completed"))).status, 503);
+  assert.equal(sessions.retrieve.mock.callCount(), 0);
+});
+
+test("Host and forwarded headers cannot change the trusted checkout redirect", async () => {
+  let parameters;
+  mock.method(sessions, "create", async (params) => {
+    parameters = params;
+    return session({ url: "https://checkout.stripe.com/pay" });
+  });
+  assert.equal((await checkout(request(undefined, { host: "attacker.example", "x-forwarded-host": "attacker.example" }))).status, 200);
+  assert.equal(parameters.success_url, origin + "/checkout/success?session_id={CHECKOUT_SESSION_ID}");
+});
+
+test("missing or invalid API keys cannot create sessions", async () => {
+  for (const value of ["", "invalid", "pk_live_notsecret"]) {
+    process.env.STRIPE_SECRET_KEY = value;
+    assert.equal((await checkout(request())).status, 503);
+  }
+  assert.equal(sessions.create.mock.callCount(), 0);
 });
 
 for (const [name, payload, headers, expected] of [
@@ -175,7 +254,7 @@ test("checkout rejects a known but unapproved product and amounts above Stripe's
   const other = products.find((item) => item.slug !== product.slug && item.subcategory !== "Beds");
   assert.equal((await checkout(request({ items: [{ slug: other.slug, quantity: 1 }] }))).status, 400);
   const approved = products.filter((item) => item.subcategory !== "Beds");
-  process.env.NUVOLA_APPROVED_PRODUCT_SLUGS = approved.map((item) => item.slug).join(",");
+  authorizedProducts.splice(0, authorizedProducts.length, ...approved.map((item) => ({ slug: item.slug, unitAmount: Math.round(item.price * 100) })));
   assert.equal((await checkout(request({ items: approved.map((item) => ({ slug: item.slug, quantity: 99 })) }))).status, 400);
 });
 
@@ -210,8 +289,9 @@ test("confirmation uses the verified session and handles paid, pending, expired 
   assert.equal(await getCheckoutResult("cs_test_bad?paid=true"), "unavailable");
 });
 
-test("confirmation remains available after live checkout is paused", async () => {
-  process.env.STRIPE_SECRET_KEY = "sk_live_localfixture";
+test("confirmation verifies the real Stripe session without a webhook or legacy flags", async () => {
+  Object.assign(process.env, { STRIPE_SECRET_KEY: "sk_live_localfixture", NODE_ENV: "production", VERCEL_ENV: "production" });
+  delete process.env.STRIPE_WEBHOOK_SECRET;
   mock.method(sessions, "retrieve", async () => session({ id: "cs_live_localfixture", livemode: true, metadata: { website: "nuvola-home", checkout_mode: "live" } }));
   assert.equal(await getCheckoutResult("cs_live_localfixture"), "paid");
 });
@@ -254,8 +334,8 @@ test("webhook ignores other sites/modes/events and retries Stripe retrieval fail
   assert.equal((await webhook(eventRequest("checkout.session.completed"))).status, 500);
 });
 
-test("live webhooks keep confirming existing payments after checkout is paused", async () => {
-  process.env.STRIPE_SECRET_KEY = "sk_live_localfixture";
+test("configured live webhooks verify payments in production", async () => {
+  Object.assign(process.env, { STRIPE_SECRET_KEY: "sk_live_localfixture", NODE_ENV: "production", VERCEL_ENV: "production" });
   const paid = session({ id: "cs_live_localfixture", livemode: true, metadata: { website: "nuvola-home", checkout_mode: "live" } });
   mock.method(sessions, "retrieve", async () => paid);
   assert.equal((await webhook(eventRequest("checkout.session.completed", paid))).status, 200);

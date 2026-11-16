@@ -4,7 +4,7 @@ export const siteConfig = {
   tagline: "Contemporary furniture for considered living.",
   description:
     "A curated destination for contemporary furniture in Miami, bringing sculptural form, natural materials, and everyday comfort together.",
-  url: "https://nuvola-home.com",
+  url: "https://www.nuvola-home.com",
   address: {
     street: "8217 Biscayne Boulevard",
     city: "Miami",
