@@ -87,6 +87,30 @@ test("STRIPE_SECRET_KEY is the only required application environment variable", 
   assert.equal(getCheckoutConfiguration().livemode, false);
 });
 
+test("the authorized production catalog matches all 21 unambiguous published products", async () => {
+  const eligible = products.filter((item) => item.subcategory !== "Beds");
+  assert.equal(eligible.length, 21);
+  assert.equal(originalAuthorizedProducts.length, eligible.length);
+  assert.equal(new Set(originalAuthorizedProducts.map((item) => item.slug)).size, eligible.length);
+  for (const item of eligible) {
+    assert.equal(originalAuthorizedProducts.find((approved) => approved.slug === item.slug)?.unitAmount, Math.round(item.price * 100));
+  }
+  authorizedProducts.splice(0, authorizedProducts.length, ...originalAuthorizedProducts);
+  let parameters;
+  mock.method(sessions, "create", async (params) => {
+    parameters = params;
+    return session({ url: "https://checkout.stripe.com/pay" });
+  });
+  const response = await checkout(request({ items: eligible.map((item) => ({ slug: item.slug, quantity: 1, price: 0.01 })) }));
+  assert.equal(response.status, 200);
+  assert.equal(parameters.line_items.length, eligible.length);
+  assert.equal(parameters.line_items.reduce((sum, item) => sum + item.price_data.unit_amount * item.quantity, 0), eligible.reduce((sum, item) => sum + Math.round(item.price * 100), 0));
+  for (const item of products.filter((item) => item.subcategory === "Beds")) {
+    assert.equal(isProductApproved(item), false);
+    assert.equal((await checkout(request({ items: [{ slug: item.slug, quantity: 1 }] }))).status, 400);
+  }
+});
+
 test("live keys work in production without an opt-in and are rejected in development/Preview", () => {
   process.env.STRIPE_SECRET_KEY = "sk_live_localfixture";
   assert.equal(getCheckoutConfiguration(), null);
