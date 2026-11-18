@@ -93,7 +93,7 @@ export default async function CheckoutSuccessPage({
 
           <p>{description}</p>
 
-          {pending && sessionId && (
+          {(pending || result === "unavailable") && sessionId && (
             <a className={styles.continueLink} href={`/checkout/success?session_id=${encodeURIComponent(sessionId)}`}>
               Check payment status
             </a>

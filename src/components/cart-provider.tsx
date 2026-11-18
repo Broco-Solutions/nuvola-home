@@ -142,6 +142,7 @@ export function CartProvider({
       ),
 
       addItem(product) {
+        if (product.subcategory === "Beds") return;
         const current = getSnapshot();
 
         const existing = current.find(

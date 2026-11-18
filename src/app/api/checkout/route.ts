@@ -2,7 +2,7 @@
 import Stripe from "stripe";
 import { getProductBySlug } from "@/data/products";
 import { getCheckoutConfiguration, getApprovedProductSlugs, isProductApproved } from "@/lib/commerce-config";
-import { MAX_CART_ITEMS, MAX_CART_QUANTITY } from "@/lib/cart";
+import { MAX_CART_ITEMS, MAX_CART_QUANTITY, hasUnsupportedVariant } from "@/lib/cart";
 import { createStripeClient } from "@/lib/stripe-client";
 
 export const runtime = "nodejs";
@@ -41,6 +41,7 @@ function isCartItem(value: unknown): value is CartItemInput {
   const item = value as Record<string, unknown>;
 
   return (
+    !hasUnsupportedVariant(item) &&
     typeof item.slug === "string" &&
     item.slug.length > 0 &&
     item.slug.length <= 128 &&
