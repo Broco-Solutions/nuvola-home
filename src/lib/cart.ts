@@ -13,6 +13,10 @@ export type PurchasedItem = Pick<CartItem, "slug" | "quantity">;
 export const MAX_CART_ITEMS = 50;
 export const MAX_CART_QUANTITY = 99;
 
+export function hasUnsupportedVariant(value: object): boolean {
+  return "variant" in value || "variantId" in value || "size" in value;
+}
+
 export function toCartItem(product: CatalogProduct, quantity: number): CartItem {
   return {
     slug: product.slug,
@@ -32,10 +36,10 @@ export function normalizeCart(value: unknown): CartItem[] {
   for (const entry of value.slice(0, MAX_CART_ITEMS)) {
     if (typeof entry !== "object" || entry === null ||
       typeof entry.slug !== "string" || seen.has(entry.slug) ||
-      !Number.isInteger(entry.quantity) || entry.quantity < 1) continue;
+      !Number.isInteger(entry.quantity) || entry.quantity < 1 || hasUnsupportedVariant(entry)) continue;
 
     const product = getProductBySlug(entry.slug);
-    if (!product) continue;
+    if (!product || product.subcategory === "Beds") continue;
     seen.add(product.slug);
     // Local storage is untrusted and may contain stale prices or image URLs.
     items.push(toCartItem(product, Math.min(entry.quantity, MAX_CART_QUANTITY)));

@@ -3,9 +3,35 @@ export type AuthorizedProduct = {
   unitAmount: number; // Approved USD price in cents, exclusive of tax.
 };
 
+export type PendingProductVariants = {
+  slug: string;
+  reason: "size-prices-unconfirmed";
+  variants: readonly { size: "Queen" | "King"; unitAmount: null }[];
+};
+
+// These sizes are published, but the single reference price does not identify
+// either size. Null is intentional: never fall back to the catalog price.
+export const pendingProductVariants: readonly PendingProductVariants[] = [
+  {
+    slug: "baxter-bed-alabaster-w-beige-velvet-headboard",
+    reason: "size-prices-unconfirmed",
+    variants: [{ size: "Queen", unitAmount: null }, { size: "King", unitAmount: null }],
+  },
+  {
+    slug: "oxford-bed-greige-oak",
+    reason: "size-prices-unconfirmed",
+    variants: [{ size: "Queen", unitAmount: null }, { size: "King", unitAmount: null }],
+  },
+  {
+    slug: "sable-bed-white-linen",
+    reason: "size-prices-unconfirmed",
+    variants: [{ size: "Queen", unitAmount: null }, { size: "King", unitAmount: null }],
+  },
+];
+
 // Nuvola authorized the published catalog and displayed prices on 2026-11-18.
 // Keep these amounts explicit so a catalog price change requires review.
-// Beds remain excluded until the buyer can select an unambiguous size.
+// Beds require confirmed size-specific prices and a selection flow.
 export const authorizedProducts: readonly AuthorizedProduct[] = [
   { slug: "forma-sectional-sofa-off-white", unitAmount: 207900 },
   { slug: "brunello-sectional-sofa-brown-velvet", unitAmount: 268900 },

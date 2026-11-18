@@ -5,7 +5,7 @@ import Stripe from "stripe";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { products } from "@/data/products";
-import { authorizedProducts } from "@/config/commerce";
+import { authorizedProducts, pendingProductVariants } from "@/config/commerce";
 import { siteConfig } from "@/config/site";
 import { getCheckoutConfiguration, isProductApproved } from "@/lib/commerce-config";
 import { normalizeCart, subtractPurchasedItems, toCartItem } from "@/lib/cart";
@@ -110,6 +110,54 @@ test("the authorized production catalog matches all 21 unambiguous published pro
     assert.equal((await checkout(request({ items: [{ slug: item.slug, quantity: 1 }] }))).status, 400);
   }
 });
+
+test("all 24 products are explicitly authorized or pending published Queen/King prices", () => {
+  const classified = [...originalAuthorizedProducts, ...pendingProductVariants].map((item) => item.slug);
+  assert.equal(classified.length, 24);
+  assert.equal(new Set(classified).size, products.length);
+  assert.deepEqual([...classified].sort(), products.map((item) => item.slug).sort());
+  assert.equal(pendingProductVariants.length, 3);
+  for (const pending of pendingProductVariants) {
+    const item = products.find((product) => product.slug === pending.slug);
+    assert.equal(item.subcategory, "Beds");
+    assert.deepEqual(pending.variants.map((variant) => variant.size), ["Queen", "King"]);
+    for (const variant of pending.variants) {
+      assert.ok(item.dimensions.includes(variant.size));
+      assert.equal(variant.unitAmount, null, "A reference price must not become a size-specific price");
+    }
+  }
+});
+
+test("unconfirmed bed sizes never reach Stripe, even with forged approvals and a mixed cart", async () => {
+  for (const pending of pendingProductVariants) {
+    const item = products.find((product) => product.slug === pending.slug);
+    authorizedProducts.push({ slug: item.slug, unitAmount: Math.round(item.price * 100) });
+    for (const variant of pending.variants) {
+      assert.equal((await checkout(request({ items: [
+        { slug: product.slug, quantity: 1 },
+        { slug: item.slug, quantity: 1, variantId: variant.size, price: item.price },
+      ] }))).status, 400);
+    }
+    assert.equal((await checkout(request({ items: [{ slug: item.slug, quantity: 1 }] }))).status, 400);
+  }
+  assert.equal(sessions.create.mock.callCount(), 0);
+});
+
+test("stored carts discard ambiguous beds and unsupported size selections", () => {
+  assert.deepEqual(normalizeCart([
+    { slug: product.slug, quantity: 1, variantId: "King" },
+    { slug: bed.slug, quantity: 1 },
+    { slug: bed.slug, quantity: 1, size: "Queen" },
+    { slug: product.slug, quantity: 2 },
+  ]), [toCartItem(product, 2)]);
+});
+
+for (const field of ["variant", "variantId", "size"]) {
+  test(`checkout rejects unsupported ${field} instead of silently charging a fixed SKU`, async () => {
+    assert.equal((await checkout(request({ items: [{ slug: product.slug, quantity: 1, [field]: "Queen" }] }))).status, 400);
+    assert.equal(sessions.create.mock.callCount(), 0);
+  });
+}
 
 test("live keys work in production without an opt-in and are rejected in development/Preview", () => {
   process.env.STRIPE_SECRET_KEY = "sk_live_localfixture";
@@ -391,6 +439,8 @@ test("cart actions, checkout snapshots and repeated success visits preserve a ne
     function Probe() { cart = useCart(); return null; }
     renderToString(createElement(CartProvider, null, createElement(Probe)));
     cart.addItem(product);
+    cart.addItem(bed);
+    assert.equal(JSON.parse(storage.get("nuvola-cart-v1")).some((item) => item.slug === bed.slug), false);
     cart.updateQuantity(product.slug, 3);
     cart.rememberCheckout("cs_test_cart", [{ slug: product.slug, quantity: 2 }]);
     cart.completeCheckout("cs_test_cart");
