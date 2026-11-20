@@ -15,6 +15,7 @@ import {
 import { useCart } from "@/components/cart-provider";
 import { formatPrice } from "@/data/products";
 import { requestCheckout } from "@/lib/checkout-client";
+import { getCartItemKey } from "@/lib/cart";
 import styles from "./cart.module.css";
 
 export default function CartPage() {
@@ -55,7 +56,7 @@ export default function CartPage() {
     setCheckoutError(null);
 
     try {
-      const purchased = items.map(({ slug, quantity }) => ({ slug, quantity }));
+      const purchased = items.map(({ slug, quantity, size }) => ({ slug, quantity, size }));
       const body = JSON.stringify({ items: purchased });
       if (checkoutRequest.current?.cart !== body) {
         checkoutRequest.current = { cart: body, id: crypto.randomUUID() };
@@ -126,7 +127,7 @@ export default function CartPage() {
 
               <div className={styles.itemList}>
                 {items.map((item) => (
-                  <article className={styles.item} key={item.slug}>
+                  <article className={styles.item} key={getCartItemKey(item)}>
                     <Link
                       href={`/products/${item.slug}`}
                       className={styles.imageLink}
@@ -155,23 +156,24 @@ export default function CartPage() {
 
                       <span className={styles.unitPrice}>
                         {formatPrice(item.price, item.currency)}
+                        {item.size && ` · ${item.size}`}
                       </span>
 
                       <div className={styles.itemActions}>
                         <div
                           className={styles.quantityControl}
-                          aria-label={`Quantity for ${item.name}`}
+                          aria-label={`Quantity for ${item.name}${item.size ? ` (${item.size})` : ""}`}
                         >
                           <button
                             type="button"
                             disabled={processing}
                             onClick={() =>
                               updateQuantity(
-                                item.slug,
+                                getCartItemKey(item),
                                 item.quantity - 1,
                               )
                             }
-                            aria-label={`Decrease quantity of ${item.name}`}
+                            aria-label={`Decrease quantity of ${item.name}${item.size ? ` (${item.size})` : ""}`}
                           >
                             <Minus size={15} />
                           </button>
@@ -187,11 +189,11 @@ export default function CartPage() {
                             }
                             onClick={() =>
                               updateQuantity(
-                                item.slug,
+                                getCartItemKey(item),
                                 item.quantity + 1,
                               )
                             }
-                            aria-label={`Increase quantity of ${item.name}`}
+                            aria-label={`Increase quantity of ${item.name}${item.size ? ` (${item.size})` : ""}`}
                           >
                             <Plus size={15} />
                           </button>
@@ -201,8 +203,8 @@ export default function CartPage() {
                           type="button"
                           disabled={processing}
                           className={styles.removeButton}
-                          onClick={() => removeItem(item.slug)}
-                          aria-label={`Remove ${item.name}`}
+                          onClick={() => removeItem(getCartItemKey(item))}
+                          aria-label={`Remove ${item.name}${item.size ? ` (${item.size})` : ""}`}
                         >
                           <Trash2 size={16} />
                           <span>Remove</span>

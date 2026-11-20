@@ -9,16 +9,17 @@ import {
   type ReactNode,
 } from "react";
 import type { CatalogProduct } from "@/data/products";
-import { normalizeCart, subtractPurchasedItems, toCartItem, MAX_CART_ITEMS, MAX_CART_QUANTITY, type CartItem, type PurchasedItem } from "@/lib/cart";
+import { normalizeCart, subtractPurchasedItems, toCartItem, getCartItemKey, MAX_CART_ITEMS, MAX_CART_QUANTITY, type CartItem, type PurchasedItem } from "@/lib/cart";
+import { isProductSizeValid, type BedSize } from "@/config/commerce";
 export type { CartItem } from "@/lib/cart";
 
 type CartContextValue = {
   items: CartItem[];
   count: number;
   subtotal: number;
-  addItem: (product: CatalogProduct) => void;
-  removeItem: (slug: string) => void;
-  updateQuantity: (slug: string, quantity: number) => void;
+  addItem: (product: CatalogProduct, size?: BedSize) => void;
+  removeItem: (itemKey: string) => void;
+  updateQuantity: (itemKey: string, quantity: number) => void;
   clearCart: () => void;
   rememberCheckout: (sessionId: string, purchased: PurchasedItem[]) => void;
   completeCheckout: (sessionId: string) => void;
@@ -141,18 +142,19 @@ export function CartProvider({
         0,
       ),
 
-      addItem(product) {
-        if (product.subcategory === "Beds") return;
+      addItem(product, size) {
+        if (!isProductSizeValid(product, size)) return;
         const current = getSnapshot();
+        const itemKey = getCartItemKey({ slug: product.slug, size });
 
         const existing = current.find(
-          (item) => item.slug === product.slug,
+          (item) => getCartItemKey(item) === itemKey,
         );
 
         if (existing) {
           saveCart(
             current.map((item) =>
-              item.slug === product.slug
+              getCartItemKey(item) === itemKey
                 ? {
                     ...item,
                     name: product.name,
@@ -173,19 +175,19 @@ export function CartProvider({
 
         saveCart([
           ...current,
-          toCartItem(product, 1),
+          toCartItem(product, 1, size),
         ]);
       },
 
-      removeItem(slug) {
+      removeItem(itemKey) {
         saveCart(
           getSnapshot().filter(
-            (item) => item.slug !== slug,
+            (item) => getCartItemKey(item) !== itemKey,
           ),
         );
       },
 
-      updateQuantity(slug, quantity) {
+      updateQuantity(itemKey, quantity) {
         if (!Number.isFinite(quantity)) return;
 
         const normalized = Math.trunc(quantity);
@@ -193,7 +195,7 @@ export function CartProvider({
         if (normalized <= 0) {
           saveCart(
             getSnapshot().filter(
-              (item) => item.slug !== slug,
+              (item) => getCartItemKey(item) !== itemKey,
             ),
           );
           return;
@@ -201,7 +203,7 @@ export function CartProvider({
 
         saveCart(
           getSnapshot().map((item) =>
-            item.slug === slug
+            getCartItemKey(item) === itemKey
               ? {
                   ...item,
                   quantity: Math.min(

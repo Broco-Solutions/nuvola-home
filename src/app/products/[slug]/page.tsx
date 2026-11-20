@@ -12,7 +12,6 @@ import { AddToCartButton } from "@/components/add-to-cart-button";
 import { ProductCard } from "@/components/product-card";
 import { ProductGallery } from "@/components/product-gallery";
 import { siteConfig } from "@/config/site";
-import { pendingProductVariants } from "@/config/commerce";
 import { getCheckoutConfiguration, isProductApproved } from "@/lib/commerce-config";
 import {
   formatPrice,
@@ -67,7 +66,6 @@ export default async function ProductPage({
 
   const canBuyOnline =
     getCheckoutConfiguration() !== null && isProductApproved(product);
-  const pendingVariants = pendingProductVariants.find((item) => item.slug === product.slug);
 
   const related = getProductsByCategory(product.category)
     .filter((item) => item.id !== product.id)
@@ -88,7 +86,7 @@ export default async function ProductPage({
     category: product.subcategory,
     color: product.colors.join(", "),
     material: product.materials.join(", "),
-    offers: pendingVariants ? undefined : {
+    offers: {
       "@type": "Offer",
       price: product.price,
       priceCurrency: product.currency,
@@ -152,12 +150,6 @@ export default async function ProductPage({
             )}
           </div>
 
-          {pendingVariants && (
-            <p className="product-note">
-              Published reference price. The price for each size must be confirmed before purchase.
-            </p>
-          )}
-
           <p className="product-lede">
             {product.shortDescription}
           </p>
@@ -165,22 +157,6 @@ export default async function ProductPage({
           <p className="product-description">
             {product.description}
           </p>
-
-          {pendingVariants && (
-            <div role="note" aria-label="Size options awaiting price confirmation">
-              <dl className="spec-list">
-                {pendingVariants.variants.map((variant) => (
-                  <div key={variant.size}>
-                    <dt>{variant.size}</dt>
-                    <dd>Price confirmation required</dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="product-note">
-                Queen and King are not available for online checkout until size-specific pricing is confirmed.
-              </p>
-            </div>
-          )}
 
           <div className="product-actions">
             {canBuyOnline ? (
