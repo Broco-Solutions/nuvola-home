@@ -218,8 +218,8 @@ export async function POST(request: Request) {
     mode: "payment",
     ui_mode: "hosted_page",
 
-    // Start with immediate-confirmation payments even when no webhook exists.
-    allowed_payment_method_types: ["card"],
+    // Omit method filters: Stripe selects eligible Dashboard-enabled methods.
+    // A completed Checkout is not proof of payment; confirmation re-fetches Stripe.
 
     line_items: lineItems,
 

@@ -68,6 +68,12 @@ function session(overrides = {}) {
   };
 }
 
+function assertDynamicPaymentMethods(parameters) {
+  for (const key of ["allowed_payment_method_types", "payment_method_types", "excluded_payment_method_types", "payment_method_configuration"]) {
+    assert.equal(Object.hasOwn(parameters, key), false, `${key} must not override Dashboard eligibility`);
+  }
+}
+
 function eventRequest(type, checkoutSession = session(), { signature, timestamp, eventLivemode } = {}) {
   const body = JSON.stringify({
     id: "evt_localfixture", object: "event", type,
@@ -247,14 +253,19 @@ test("coded approvals reject unconfigured beds, price drift and environment-base
   assert.equal(sessions.create.mock.callCount(), 0);
 });
 
-test("uses backend prices, cards, billing, Tax and idempotency without shipping", async () => {
+test("uses backend prices, dynamic methods, billing, Tax and idempotency without shipping", async () => {
   let parameters, options;
   mock.method(sessions, "create", async (params, opts) => {
     parameters = params; options = opts;
     return session({ url: "https://checkout.stripe.com/c/pay/cs_test_localfixture" });
   });
   const id = randomUUID();
-  const response = await checkout(request({ items: [{ slug: product.slug, quantity: 2, price: 0.01, currency: "eur" }], shipping: 999 }, { "idempotency-key": id }));
+  const response = await checkout(request({
+    items: [{ slug: product.slug, quantity: 2, price: 0.01, currency: "eur" }], shipping: 999,
+    allowed_payment_method_types: ["card"], payment_method_types: ["card"],
+    excluded_payment_method_types: ["affirm", "klarna", "afterpay_clearpay"],
+    payment_method_configuration: "pmc_forged",
+  }, { "idempotency-key": id }));
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal((await response.json()).sessionId, "cs_test_localfixture");
@@ -262,8 +273,7 @@ test("uses backend prices, cards, billing, Tax and idempotency without shipping"
   assert.equal(parameters.line_items[0].price_data.currency, "usd");
   assert.equal(parameters.line_items[0].quantity, 2);
   assert.equal(parameters.line_items[0].price_data.tax_behavior, "exclusive");
-  assert.deepEqual(parameters.allowed_payment_method_types, ["card"]);
-  assert.equal(parameters.payment_method_types, undefined);
+  assertDynamicPaymentMethods(parameters);
   assert.equal(parameters.shipping_address_collection, undefined);
   assert.equal(parameters.shipping_options, undefined);
   assert.equal(parameters.payment_intent_data.shipping, undefined);
@@ -275,7 +285,7 @@ test("uses backend prices, cards, billing, Tax and idempotency without shipping"
   assert.equal(options.idempotencyKey, `nuvola-checkout-${id}`);
 });
 
-test("production creates card sessions using only STRIPE_SECRET_KEY, without a webhook", async () => {
+test("production creates dynamic sessions using only STRIPE_SECRET_KEY, without a webhook", async () => {
   Object.assign(process.env, { STRIPE_SECRET_KEY: "sk_live_localfixture", NODE_ENV: "production", VERCEL_ENV: "production" });
   for (const name of ["STRIPE_WEBHOOK_SECRET", "NUVOLA_SITE_URL", "NUVOLA_APPROVED_PRODUCT_SLUGS", "STRIPE_LIVE_CHECKOUT_ENABLED"]) delete process.env[name];
   let parameters;
@@ -288,7 +298,7 @@ test("production creates card sessions using only STRIPE_SECRET_KEY, without a w
     body: JSON.stringify({ items: [{ slug: product.slug, quantity: 1 }] }),
   }));
   assert.equal(response.status, 200);
-  assert.deepEqual(parameters.allowed_payment_method_types, ["card"]);
+  assertDynamicPaymentMethods(parameters);
   assert.equal(parameters.automatic_tax.enabled, true);
   assert.equal(parameters.success_url, siteConfig.url + "/checkout/success?session_id={CHECKOUT_SESSION_ID}");
   assert.equal(parameters.cancel_url, siteConfig.url + "/cart");
@@ -401,6 +411,36 @@ test("confirmation verifies the real Stripe session without a webhook or legacy 
   assert.equal(await getCheckoutResult("cs_live_localfixture"), "paid");
 });
 
+for (const method of ["affirm", "klarna", "afterpay_clearpay", "us_bank_account"]) {
+  test(`${method}: confirmation waits for Stripe to mark the session paid`, async () => {
+    // Exercise the same guard for any method, including genuinely delayed methods.
+    // Installment repayment schedules do not themselves mean delayed confirmation.
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+    let current = session({
+      payment_method_types: [method], payment_status: "unpaid",
+      payment_intent: { status: "processing" },
+    });
+    mock.method(sessions, "retrieve", async () => current);
+    assert.equal(await getCheckoutResult("cs_test_localfixture"), "pending");
+    current = session({ ...current, payment_status: "paid", payment_intent: { status: "succeeded" } });
+    assert.equal(await getCheckoutResult("cs_test_localfixture"), "paid");
+    assert.deepEqual(sessions.retrieve.mock.calls.at(-1).arguments, ["cs_test_localfixture", { expand: ["payment_intent"] }]);
+  });
+}
+
+test("an unpaid async payment with a succeeded intent is still not confirmed", async () => {
+  mock.method(sessions, "retrieve", async () => session({ payment_status: "unpaid", payment_intent: { status: "succeeded" } }));
+  assert.equal(await getCheckoutResult("cs_test_localfixture"), "pending");
+});
+
+test("async cancellation and failure remain unconfirmed without a webhook", async () => {
+  delete process.env.STRIPE_WEBHOOK_SECRET;
+  for (const intent of [{ status: "canceled" }, { status: "requires_payment_method", last_payment_error: { code: "payment_method_provider_decline" } }]) {
+    mock.method(sessions, "retrieve", async () => session({ payment_status: "unpaid", payment_intent: intent }));
+    assert.equal(await getCheckoutResult("cs_test_localfixture"), "failed");
+  }
+});
+
 test("webhook rejects absent, forged, stale and tampered signatures", async () => {
   const missing = eventRequest("checkout.session.completed");
   missing.headers.delete("stripe-signature");
@@ -429,6 +469,22 @@ test("signed webhook distinguishes pending, failed and expired sessions", async 
   mock.method(sessions, "retrieve", async () => session({ status: "expired", payment_status: "unpaid" }));
   await webhook(eventRequest("checkout.session.expired"));
   assert.equal(console.info.mock.calls.at(-1).arguments[0], "NUVOLA_PAYMENT_FAILED");
+});
+
+test("completed and async-success event snapshots cannot confirm a still-unpaid Stripe session", async () => {
+  mock.method(sessions, "retrieve", async () => session({ payment_status: "unpaid", payment_intent: { status: "processing" } }));
+  for (const type of ["checkout.session.completed", "checkout.session.async_payment_succeeded"]) {
+    // The signed event says paid, but the fresh API response remains authoritative.
+    assert.equal((await webhook(eventRequest(type, session()))).status, 200);
+    assert.equal(console.info.mock.calls.at(-1).arguments[0], "NUVOLA_PAYMENT_PENDING");
+  }
+  assert.equal(console.info.mock.calls.some((call) => call.arguments[0] === "NUVOLA_PAYMENT_CONFIRMED"), false);
+});
+
+test("async success confirms only the fresh paid response, even if the event snapshot is unpaid", async () => {
+  mock.method(sessions, "retrieve", async () => session());
+  assert.equal((await webhook(eventRequest("checkout.session.async_payment_succeeded", session({ payment_status: "unpaid" })))).status, 200);
+  assert.equal(console.info.mock.calls.at(-1).arguments[0], "NUVOLA_PAYMENT_CONFIRMED");
 });
 
 test("webhook ignores other sites/modes/events and retries Stripe retrieval failures", async () => {
