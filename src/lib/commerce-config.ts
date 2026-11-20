@@ -1,5 +1,5 @@
 import type { Product } from "@/data/products";
-import { authorizedProducts } from "@/config/commerce";
+import { authorizedProducts, isBedSize } from "@/config/commerce";
 import { siteConfig } from "@/config/site";
 
 export function getApprovedProductSlugs(): Set<string> {
@@ -7,10 +7,10 @@ export function getApprovedProductSlugs(): Set<string> {
 }
 
 export function isProductApproved(product: Product): boolean {
-  // The captured catalog has no selectable Queen/King variant.
-  return product.subcategory !== "Beds" && authorizedProducts.some((approved) =>
+  return authorizedProducts.some((approved) =>
     approved.slug === product.slug && Number.isSafeInteger(approved.unitAmount) &&
-    approved.unitAmount >= 50 && approved.unitAmount === Math.round(product.price * 100),
+    approved.unitAmount >= 50 && approved.unitAmount === Math.round(product.price * 100) &&
+    (product.subcategory !== "Beds" || Boolean(approved.sizes?.length && approved.sizes.every(isBedSize))),
   );
 }
 

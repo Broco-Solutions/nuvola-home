@@ -2,7 +2,8 @@
 import Stripe from "stripe";
 import { getProductBySlug } from "@/data/products";
 import { getCheckoutConfiguration, getApprovedProductSlugs, isProductApproved } from "@/lib/commerce-config";
-import { MAX_CART_ITEMS, MAX_CART_QUANTITY, hasUnsupportedVariant } from "@/lib/cart";
+import { MAX_CART_ITEMS, MAX_CART_QUANTITY, hasUnsupportedVariant, getCartItemKey } from "@/lib/cart";
+import { isBedSize, isProductSizeValid, type BedSize } from "@/config/commerce";
 import { createStripeClient } from "@/lib/stripe-client";
 
 export const runtime = "nodejs";
@@ -15,6 +16,7 @@ const MAX_BODY_SIZE = 16_384;
 type CartItemInput = {
   slug: string;
   quantity: number;
+  size?: BedSize;
 };
 
 function jsonError(message: string, status: number) {
@@ -42,6 +44,7 @@ function isCartItem(value: unknown): value is CartItemInput {
 
   return (
     !hasUnsupportedVariant(item) &&
+    (item.size === undefined || isBedSize(item.size)) &&
     typeof item.slug === "string" &&
     item.slug.length > 0 &&
     item.slug.length <= 128 &&
@@ -148,11 +151,12 @@ export async function POST(request: Request) {
       return jsonError("Invalid cart item.", 400);
     }
 
-    if (seenProducts.has(item.slug)) {
+    const itemKey = getCartItemKey(item);
+    if (seenProducts.has(itemKey)) {
       return jsonError("Duplicate cart item.", 400);
     }
 
-    seenProducts.add(item.slug);
+    seenProducts.add(itemKey);
 
     const product = getProductBySlug(item.slug);
 
@@ -163,11 +167,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Bed size is not selectable in the current catalog.
-    // Do not charge for an ambiguous Queen/King variant.
-    if (product.subcategory === "Beds") {
+    if (!isProductSizeValid(product, item.size)) {
       return jsonError(
-        "Please contact the showroom to confirm bed size.",
+        "Please select a valid size for this product.",
         400,
       );
     }
@@ -200,10 +202,11 @@ export async function POST(request: Request) {
         unit_amount: unitAmount,
         tax_behavior: "exclusive",
         product_data: {
-          name: product.name,
+          name: item.size ? `${product.name} — ${item.size}` : product.name,
           description: product.shortDescription,
           metadata: {
             slug: product.slug,
+            ...(item.size ? { size: item.size } : {}),
           },
         },
       },
@@ -215,8 +218,8 @@ export async function POST(request: Request) {
     mode: "payment",
     ui_mode: "hosted_page",
 
-    // Start with immediate-confirmation payments even when no webhook exists.
-    allowed_payment_method_types: ["card"],
+    // Omit method filters: Stripe selects eligible Dashboard-enabled methods.
+    // A completed Checkout is not proof of payment; confirmation re-fetches Stripe.
 
     line_items: lineItems,
 

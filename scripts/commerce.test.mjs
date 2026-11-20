@@ -5,10 +5,10 @@ import Stripe from "stripe";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { products } from "@/data/products";
-import { authorizedProducts, pendingProductVariants } from "@/config/commerce";
+import { authorizedProducts, getProductSizes, isProductSizeValid } from "@/config/commerce";
 import { siteConfig } from "@/config/site";
 import { getCheckoutConfiguration, isProductApproved } from "@/lib/commerce-config";
-import { normalizeCart, subtractPurchasedItems, toCartItem } from "@/lib/cart";
+import { normalizeCart, subtractPurchasedItems, toCartItem, getCartItemKey } from "@/lib/cart";
 import { getCheckoutResult } from "@/lib/stripe-payment";
 import { requestCheckout } from "@/lib/checkout-client";
 import { CartProvider, useCart } from "@/components/cart-provider";
@@ -68,6 +68,12 @@ function session(overrides = {}) {
   };
 }
 
+function assertDynamicPaymentMethods(parameters) {
+  for (const key of ["allowed_payment_method_types", "payment_method_types", "excluded_payment_method_types", "payment_method_configuration"]) {
+    assert.equal(Object.hasOwn(parameters, key), false, `${key} must not override Dashboard eligibility`);
+  }
+}
+
 function eventRequest(type, checkoutSession = session(), { signature, timestamp, eventLivemode } = {}) {
   const body = JSON.stringify({
     id: "evt_localfixture", object: "event", type,
@@ -87,9 +93,9 @@ test("STRIPE_SECRET_KEY is the only required application environment variable", 
   assert.equal(getCheckoutConfiguration().livemode, false);
 });
 
-test("the authorized production catalog matches all 21 unambiguous published products", async () => {
-  const eligible = products.filter((item) => item.subcategory !== "Beds");
-  assert.equal(eligible.length, 21);
+test("all 24 published products and 27 size selections use their authorized server prices", async () => {
+  const eligible = products;
+  assert.equal(eligible.length, 24);
   assert.equal(originalAuthorizedProducts.length, eligible.length);
   assert.equal(new Set(originalAuthorizedProducts.map((item) => item.slug)).size, eligible.length);
   for (const item of eligible) {
@@ -101,55 +107,88 @@ test("the authorized production catalog matches all 21 unambiguous published pro
     parameters = params;
     return session({ url: "https://checkout.stripe.com/pay" });
   });
-  const response = await checkout(request({ items: eligible.map((item) => ({ slug: item.slug, quantity: 1, price: 0.01 })) }));
+  const selections = eligible.flatMap((item) => item.subcategory === "Beds"
+    ? getProductSizes(item.slug).map((size) => ({ slug: item.slug, size, quantity: 1, price: 0.01 }))
+    : [{ slug: item.slug, quantity: 1, price: 0.01 }]);
+  assert.equal(selections.length, 27);
+  const response = await checkout(request({ items: selections }));
   assert.equal(response.status, 200);
-  assert.equal(parameters.line_items.length, eligible.length);
-  assert.equal(parameters.line_items.reduce((sum, item) => sum + item.price_data.unit_amount * item.quantity, 0), eligible.reduce((sum, item) => sum + Math.round(item.price * 100), 0));
-  for (const item of products.filter((item) => item.subcategory === "Beds")) {
-    assert.equal(isProductApproved(item), false);
-    assert.equal((await checkout(request({ items: [{ slug: item.slug, quantity: 1 }] }))).status, 400);
-  }
+  assert.equal(parameters.line_items.length, 27);
+  assert.equal(parameters.line_items.reduce((sum, item) => sum + item.price_data.unit_amount * item.quantity, 0), eligible.reduce((sum, item) => sum + Math.round(item.price * 100) * (item.subcategory === "Beds" ? 2 : 1), 0));
 });
 
-test("all 24 products are explicitly authorized or pending published Queen/King prices", () => {
-  const classified = [...originalAuthorizedProducts, ...pendingProductVariants].map((item) => item.slug);
+test("all 24 products are authorized and beds require an explicitly approved size", () => {
+  const classified = originalAuthorizedProducts.map((item) => item.slug);
   assert.equal(classified.length, 24);
   assert.equal(new Set(classified).size, products.length);
   assert.deepEqual([...classified].sort(), products.map((item) => item.slug).sort());
-  assert.equal(pendingProductVariants.length, 3);
-  for (const pending of pendingProductVariants) {
-    const item = products.find((product) => product.slug === pending.slug);
-    assert.equal(item.subcategory, "Beds");
-    assert.deepEqual(pending.variants.map((variant) => variant.size), ["Queen", "King"]);
-    for (const variant of pending.variants) {
-      assert.ok(item.dimensions.includes(variant.size));
-      assert.equal(variant.unitAmount, null, "A reference price must not become a size-specific price");
+  authorizedProducts.splice(0, authorizedProducts.length, ...originalAuthorizedProducts);
+  const beds = products.filter((item) => item.subcategory === "Beds");
+  assert.equal(beds.length, 3);
+  for (const item of beds) {
+    assert.equal(isProductApproved(item), true);
+    assert.deepEqual(getProductSizes(item.slug), ["Queen", "King"]);
+    assert.equal(isProductSizeValid(item, undefined), false);
+    for (const size of getProductSizes(item.slug)) {
+      assert.ok(item.dimensions.includes(size));
+      assert.equal(isProductSizeValid(item, size), true);
     }
   }
 });
 
-test("unconfirmed bed sizes never reach Stripe, even with forged approvals and a mixed cart", async () => {
-  for (const pending of pendingProductVariants) {
-    const item = products.find((product) => product.slug === pending.slug);
-    authorizedProducts.push({ slug: item.slug, unitAmount: Math.round(item.price * 100) });
-    for (const variant of pending.variants) {
+test("missing or invalid sizes and duplicate size selections never reach Stripe", async () => {
+  authorizedProducts.splice(0, authorizedProducts.length, ...originalAuthorizedProducts);
+  for (const item of products.filter((product) => product.subcategory === "Beds")) {
+    for (const size of [undefined, null, "Twin", "queen", { name: "King" }]) {
       assert.equal((await checkout(request({ items: [
         { slug: product.slug, quantity: 1 },
-        { slug: item.slug, quantity: 1, variantId: variant.size, price: item.price },
+        { slug: item.slug, quantity: 1, size, price: item.price },
       ] }))).status, 400);
     }
-    assert.equal((await checkout(request({ items: [{ slug: item.slug, quantity: 1 }] }))).status, 400);
+    const selected = { slug: item.slug, quantity: 1, size: "Queen" };
+    assert.equal((await checkout(request({ items: [selected, selected] }))).status, 400);
   }
   assert.equal(sessions.create.mock.callCount(), 0);
 });
 
-test("stored carts discard ambiguous beds and unsupported size selections", () => {
+test("stored carts retain Queen and King separately and discard ambiguous or forged selections", () => {
+  authorizedProducts.splice(0, authorizedProducts.length, ...originalAuthorizedProducts);
   assert.deepEqual(normalizeCart([
     { slug: product.slug, quantity: 1, variantId: "King" },
     { slug: bed.slug, quantity: 1 },
-    { slug: bed.slug, quantity: 1, size: "Queen" },
+    { slug: bed.slug, quantity: 2, size: "Queen", price: 0.01, name: "forged" },
+    { slug: bed.slug, quantity: 1, size: "King", price: 0.01 },
+    { slug: bed.slug, quantity: 3, size: "Queen" },
+    { slug: bed.slug, quantity: 1, size: "Twin" },
+    { slug: product.slug, quantity: 1, size: "Queen" },
     { slug: product.slug, quantity: 2 },
-  ]), [toCartItem(product, 2)]);
+  ]), [toCartItem(bed, 2, "Queen"), toCartItem(bed, 1, "King"), toCartItem(product, 2)]);
+});
+
+for (const item of products.filter((product) => product.subcategory === "Beds")) {
+  for (const size of ["Queen", "King"]) {
+    test(`${item.slug} ${size} uses the published price and sends its size to Stripe`, async () => {
+      authorizedProducts.splice(0, authorizedProducts.length, ...originalAuthorizedProducts);
+      let parameters;
+      mock.method(sessions, "create", async (params) => {
+        parameters = params;
+        return session({ url: "https://checkout.stripe.com/pay" });
+      });
+      assert.equal((await checkout(request({ items: [{ slug: item.slug, size, quantity: 2, price: 0.01, currency: "eur" }] }))).status, 200);
+      const line = parameters.line_items[0];
+      assert.equal(line.price_data.unit_amount, Math.round(item.price * 100));
+      assert.equal(line.price_data.currency, "usd");
+      assert.equal(line.quantity, 2);
+      assert.equal(line.price_data.product_data.name, `${item.name} — ${size}`);
+      assert.deepEqual(line.price_data.product_data.metadata, { slug: item.slug, size });
+    });
+  }
+}
+
+test("a known size not authorized for this product is rejected", async () => {
+  authorizedProducts.push({ slug: bed.slug, unitAmount: Math.round(bed.price * 100), sizes: ["Queen"] });
+  assert.equal((await checkout(request({ items: [{ slug: bed.slug, quantity: 1, size: "King" }] }))).status, 400);
+  assert.equal(sessions.create.mock.callCount(), 0);
 });
 
 for (const field of ["variant", "variantId", "size"]) {
@@ -195,7 +234,7 @@ test("test redirects use only loopback or Vercel-supplied origins", () => {
   assert.equal(getCheckoutConfiguration(), null);
 });
 
-test("coded approvals reject beds, price drift and environment-based authorization", async () => {
+test("coded approvals reject unconfigured beds, price drift and environment-based authorization", async () => {
   assert.equal(isProductApproved(product), true);
   authorizedProducts.push({ slug: bed.slug, unitAmount: Math.round(bed.price * 100) });
   assert.equal(isProductApproved(bed), false);
@@ -214,14 +253,19 @@ test("coded approvals reject beds, price drift and environment-based authorizati
   assert.equal(sessions.create.mock.callCount(), 0);
 });
 
-test("uses backend prices, cards, billing, Tax and idempotency without shipping", async () => {
+test("uses backend prices, dynamic methods, billing, Tax and idempotency without shipping", async () => {
   let parameters, options;
   mock.method(sessions, "create", async (params, opts) => {
     parameters = params; options = opts;
     return session({ url: "https://checkout.stripe.com/c/pay/cs_test_localfixture" });
   });
   const id = randomUUID();
-  const response = await checkout(request({ items: [{ slug: product.slug, quantity: 2, price: 0.01, currency: "eur" }], shipping: 999 }, { "idempotency-key": id }));
+  const response = await checkout(request({
+    items: [{ slug: product.slug, quantity: 2, price: 0.01, currency: "eur" }], shipping: 999,
+    allowed_payment_method_types: ["card"], payment_method_types: ["card"],
+    excluded_payment_method_types: ["affirm", "klarna", "afterpay_clearpay"],
+    payment_method_configuration: "pmc_forged",
+  }, { "idempotency-key": id }));
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal((await response.json()).sessionId, "cs_test_localfixture");
@@ -229,8 +273,7 @@ test("uses backend prices, cards, billing, Tax and idempotency without shipping"
   assert.equal(parameters.line_items[0].price_data.currency, "usd");
   assert.equal(parameters.line_items[0].quantity, 2);
   assert.equal(parameters.line_items[0].price_data.tax_behavior, "exclusive");
-  assert.deepEqual(parameters.allowed_payment_method_types, ["card"]);
-  assert.equal(parameters.payment_method_types, undefined);
+  assertDynamicPaymentMethods(parameters);
   assert.equal(parameters.shipping_address_collection, undefined);
   assert.equal(parameters.shipping_options, undefined);
   assert.equal(parameters.payment_intent_data.shipping, undefined);
@@ -242,7 +285,7 @@ test("uses backend prices, cards, billing, Tax and idempotency without shipping"
   assert.equal(options.idempotencyKey, `nuvola-checkout-${id}`);
 });
 
-test("production creates card sessions using only STRIPE_SECRET_KEY, without a webhook", async () => {
+test("production creates dynamic sessions using only STRIPE_SECRET_KEY, without a webhook", async () => {
   Object.assign(process.env, { STRIPE_SECRET_KEY: "sk_live_localfixture", NODE_ENV: "production", VERCEL_ENV: "production" });
   for (const name of ["STRIPE_WEBHOOK_SECRET", "NUVOLA_SITE_URL", "NUVOLA_APPROVED_PRODUCT_SLUGS", "STRIPE_LIVE_CHECKOUT_ENABLED"]) delete process.env[name];
   let parameters;
@@ -255,7 +298,7 @@ test("production creates card sessions using only STRIPE_SECRET_KEY, without a w
     body: JSON.stringify({ items: [{ slug: product.slug, quantity: 1 }] }),
   }));
   assert.equal(response.status, 200);
-  assert.deepEqual(parameters.allowed_payment_method_types, ["card"]);
+  assertDynamicPaymentMethods(parameters);
   assert.equal(parameters.automatic_tax.enabled, true);
   assert.equal(parameters.success_url, siteConfig.url + "/checkout/success?session_id={CHECKOUT_SESSION_ID}");
   assert.equal(parameters.cancel_url, siteConfig.url + "/cart");
@@ -368,6 +411,36 @@ test("confirmation verifies the real Stripe session without a webhook or legacy 
   assert.equal(await getCheckoutResult("cs_live_localfixture"), "paid");
 });
 
+for (const method of ["affirm", "klarna", "afterpay_clearpay", "us_bank_account"]) {
+  test(`${method}: confirmation waits for Stripe to mark the session paid`, async () => {
+    // Exercise the same guard for any method, including genuinely delayed methods.
+    // Installment repayment schedules do not themselves mean delayed confirmation.
+    delete process.env.STRIPE_WEBHOOK_SECRET;
+    let current = session({
+      payment_method_types: [method], payment_status: "unpaid",
+      payment_intent: { status: "processing" },
+    });
+    mock.method(sessions, "retrieve", async () => current);
+    assert.equal(await getCheckoutResult("cs_test_localfixture"), "pending");
+    current = session({ ...current, payment_status: "paid", payment_intent: { status: "succeeded" } });
+    assert.equal(await getCheckoutResult("cs_test_localfixture"), "paid");
+    assert.deepEqual(sessions.retrieve.mock.calls.at(-1).arguments, ["cs_test_localfixture", { expand: ["payment_intent"] }]);
+  });
+}
+
+test("an unpaid async payment with a succeeded intent is still not confirmed", async () => {
+  mock.method(sessions, "retrieve", async () => session({ payment_status: "unpaid", payment_intent: { status: "succeeded" } }));
+  assert.equal(await getCheckoutResult("cs_test_localfixture"), "pending");
+});
+
+test("async cancellation and failure remain unconfirmed without a webhook", async () => {
+  delete process.env.STRIPE_WEBHOOK_SECRET;
+  for (const intent of [{ status: "canceled" }, { status: "requires_payment_method", last_payment_error: { code: "payment_method_provider_decline" } }]) {
+    mock.method(sessions, "retrieve", async () => session({ payment_status: "unpaid", payment_intent: intent }));
+    assert.equal(await getCheckoutResult("cs_test_localfixture"), "failed");
+  }
+});
+
 test("webhook rejects absent, forged, stale and tampered signatures", async () => {
   const missing = eventRequest("checkout.session.completed");
   missing.headers.delete("stripe-signature");
@@ -396,6 +469,22 @@ test("signed webhook distinguishes pending, failed and expired sessions", async 
   mock.method(sessions, "retrieve", async () => session({ status: "expired", payment_status: "unpaid" }));
   await webhook(eventRequest("checkout.session.expired"));
   assert.equal(console.info.mock.calls.at(-1).arguments[0], "NUVOLA_PAYMENT_FAILED");
+});
+
+test("completed and async-success event snapshots cannot confirm a still-unpaid Stripe session", async () => {
+  mock.method(sessions, "retrieve", async () => session({ payment_status: "unpaid", payment_intent: { status: "processing" } }));
+  for (const type of ["checkout.session.completed", "checkout.session.async_payment_succeeded"]) {
+    // The signed event says paid, but the fresh API response remains authoritative.
+    assert.equal((await webhook(eventRequest(type, session()))).status, 200);
+    assert.equal(console.info.mock.calls.at(-1).arguments[0], "NUVOLA_PAYMENT_PENDING");
+  }
+  assert.equal(console.info.mock.calls.some((call) => call.arguments[0] === "NUVOLA_PAYMENT_CONFIRMED"), false);
+});
+
+test("async success confirms only the fresh paid response, even if the event snapshot is unpaid", async () => {
+  mock.method(sessions, "retrieve", async () => session());
+  assert.equal((await webhook(eventRequest("checkout.session.async_payment_succeeded", session({ payment_status: "unpaid" })))).status, 200);
+  assert.equal(console.info.mock.calls.at(-1).arguments[0], "NUVOLA_PAYMENT_CONFIRMED");
 });
 
 test("webhook ignores other sites/modes/events and retries Stripe retrieval failures", async () => {
@@ -458,6 +547,66 @@ test("cart actions, checkout snapshots and repeated success visits preserve a ne
     if (previousWindow === undefined) delete globalThis.window;
     else globalThis.window = previousWindow;
   }
+});
+
+test("Queen and King have independent cart quantities, removal and payment snapshots", () => {
+  authorizedProducts.splice(0, authorizedProducts.length, ...originalAuthorizedProducts);
+  const storage = new Map();
+  const snapshots = new Map();
+  const adapter = (map) => ({ getItem: (key) => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), removeItem: (key) => map.delete(key) });
+  const previousWindow = globalThis.window;
+  globalThis.window = { localStorage: adapter(storage), sessionStorage: adapter(snapshots) };
+  let cart;
+  const read = () => JSON.parse(storage.get("nuvola-cart-v1"));
+  const queenKey = getCartItemKey({ slug: bed.slug, size: "Queen" });
+  const kingKey = getCartItemKey({ slug: bed.slug, size: "King" });
+  function Probe() { cart = useCart(); return null; }
+  try {
+    renderToString(createElement(CartProvider, null, createElement(Probe)));
+    cart.clearCart();
+    cart.addItem(bed);
+    assert.deepEqual(read(), []);
+    cart.addItem(bed, "Queen");
+    cart.addItem(bed, "King");
+    cart.addItem(bed, "Queen");
+    assert.deepEqual(read().map(({ size, quantity }) => ({ size, quantity })), [{ size: "Queen", quantity: 2 }, { size: "King", quantity: 1 }]);
+    assert.deepEqual(normalizeCart(read()), read(), "Both selections must survive reload");
+    cart.updateQuantity(queenKey, 3);
+    assert.equal(read().find((item) => item.size === "King").quantity, 1);
+    cart.removeItem(kingKey);
+    assert.deepEqual(read().map((item) => item.size), ["Queen"]);
+    cart.addItem(bed, "King");
+    cart.rememberCheckout("cs_test_sizes", [{ slug: bed.slug, size: "Queen", quantity: 2 }]);
+    assert.equal(JSON.parse(snapshots.get("nuvola-checkout-cs_test_sizes"))[0].size, "Queen");
+    cart.completeCheckout("cs_test_sizes");
+    assert.deepEqual(read().map(({ size, quantity }) => ({ size, quantity })), [{ size: "Queen", quantity: 1 }, { size: "King", quantity: 1 }]);
+    cart.addItem(bed, "King");
+    cart.completeCheckout("cs_test_sizes");
+    assert.deepEqual(read().map(({ size, quantity }) => ({ size, quantity })), [{ size: "Queen", quantity: 1 }, { size: "King", quantity: 2 }]);
+  } finally {
+    cart?.clearCart();
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+test("payment cleanup subtracts only the purchased size", () => {
+  const current = [toCartItem(bed, 4, "Queen"), toCartItem(bed, 2, "King"), toCartItem(product, 1)];
+  assert.deepEqual(subtractPurchasedItems(current, [{ slug: bed.slug, size: "King", quantity: 1 }]), [toCartItem(bed, 4, "Queen"), toCartItem(bed, 1, "King"), toCartItem(product, 1)]);
+});
+
+test("checkout requests retain selected sizes and distinguish otherwise identical carts", async () => {
+  const bodies = [];
+  mock.method(globalThis, "fetch", async (_url, options) => {
+    bodies.push(options.body);
+    return Response.json({ url: "https://checkout.stripe.com/pay", sessionId: "cs_test_size" });
+  });
+  const id = randomUUID();
+  await requestCheckout([{ slug: bed.slug, size: "Queen", quantity: 1 }], id);
+  await requestCheckout([{ slug: bed.slug, size: "King", quantity: 1 }], id);
+  assert.equal(JSON.parse(bodies[0]).items[0].size, "Queen");
+  assert.equal(JSON.parse(bodies[1]).items[0].size, "King");
+  assert.notEqual(bodies[0], bodies[1]);
 });
 
 test("a stalled checkout times out and the same request can be retried safely", async (t) => {

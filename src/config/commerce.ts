@@ -1,37 +1,14 @@
+export type BedSize = "Queen" | "King";
+
 export type AuthorizedProduct = {
   slug: string;
   unitAmount: number; // Approved USD price in cents, exclusive of tax.
+  sizes?: readonly BedSize[]; // Each listed size uses this same approved price.
 };
-
-export type PendingProductVariants = {
-  slug: string;
-  reason: "size-prices-unconfirmed";
-  variants: readonly { size: "Queen" | "King"; unitAmount: null }[];
-};
-
-// These sizes are published, but the single reference price does not identify
-// either size. Null is intentional: never fall back to the catalog price.
-export const pendingProductVariants: readonly PendingProductVariants[] = [
-  {
-    slug: "baxter-bed-alabaster-w-beige-velvet-headboard",
-    reason: "size-prices-unconfirmed",
-    variants: [{ size: "Queen", unitAmount: null }, { size: "King", unitAmount: null }],
-  },
-  {
-    slug: "oxford-bed-greige-oak",
-    reason: "size-prices-unconfirmed",
-    variants: [{ size: "Queen", unitAmount: null }, { size: "King", unitAmount: null }],
-  },
-  {
-    slug: "sable-bed-white-linen",
-    reason: "size-prices-unconfirmed",
-    variants: [{ size: "Queen", unitAmount: null }, { size: "King", unitAmount: null }],
-  },
-];
 
 // Nuvola authorized the published catalog and displayed prices on 2026-11-18.
 // Keep these amounts explicit so a catalog price change requires review.
-// Beds require confirmed size-specific prices and a selection flow.
+// Queen and King were explicitly authorized at each bed's published price.
 export const authorizedProducts: readonly AuthorizedProduct[] = [
   { slug: "forma-sectional-sofa-off-white", unitAmount: 207900 },
   { slug: "brunello-sectional-sofa-brown-velvet", unitAmount: 268900 },
@@ -45,6 +22,9 @@ export const authorizedProducts: readonly AuthorizedProduct[] = [
   { slug: "oxford-dining-chair-off-white-brass-frame", unitAmount: 32900 },
   { slug: "rune-swivel-dining-chair-beige", unitAmount: 41900 },
   { slug: "sand-dining-chair-vegan-leather-beige", unitAmount: 42000 },
+  { slug: "baxter-bed-alabaster-w-beige-velvet-headboard", unitAmount: 159900, sizes: ["Queen", "King"] },
+  { slug: "oxford-bed-greige-oak", unitAmount: 179900, sizes: ["Queen", "King"] },
+  { slug: "sable-bed-white-linen", unitAmount: 159900, sizes: ["Queen", "King"] },
   { slug: "oxford-nightstand-greige-oak", unitAmount: 69900 },
   { slug: "lioh-dresser-alabaster", unitAmount: 119900 },
   { slug: "elora-bench-greige-boucle", unitAmount: 41900 },
@@ -55,3 +35,17 @@ export const authorizedProducts: readonly AuthorizedProduct[] = [
   { slug: "aura-outdoor-dining-chair", unitAmount: 29900 },
   { slug: "pebble-outdoor-coffee-table", unitAmount: 39900 },
 ];
+
+export function isBedSize(value: unknown): value is BedSize {
+  return value === "Queen" || value === "King";
+}
+
+export function getProductSizes(slug: string): readonly BedSize[] {
+  return authorizedProducts.find((item) => item.slug === slug)?.sizes ?? [];
+}
+
+export function isProductSizeValid(product: { slug: string; subcategory: string }, size: unknown): boolean {
+  return product.subcategory === "Beds"
+    ? isBedSize(size) && getProductSizes(product.slug).includes(size)
+    : size === undefined;
+}
